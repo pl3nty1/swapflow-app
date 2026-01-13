@@ -667,10 +667,15 @@ async def root():
 # Include the router in the main app
 app.include_router(api_router)
 
+# CORS configuration
+cors_origins = os.environ.get('CORS_ORIGINS', 'https://swapflow-app.vercel.app').split(',')
+# Remove any empty strings and ensure we have valid origins
+cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=cors_origins if cors_origins else ['https://swapflow-app.vercel.app'],
     allow_methods=["*"],
     allow_headers=["*"],
 )

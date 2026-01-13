@@ -4,9 +4,9 @@ import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { ArrowLeftRight, ArrowRight, Star, Users, Shield } from "lucide-react";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://swapflow-app-uj7o.vercel.app';
 const API = `${BACKEND_URL}/api`;
-const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '230390770808-2u6f0s330fntsf8878mukt32a9crmqro.apps.googleusercontent.com';
 
 const Landing = () => {
   const navigate = useNavigate();
@@ -66,8 +66,15 @@ const Landing = () => {
 
     // Check if already authenticated
     const checkAuth = async () => {
+      if (!API) {
+        setIsCheckingAuth(false);
+        return;
+      }
       try {
-        const response = await axios.get(`${API}/auth/me`, { withCredentials: true });
+        const response = await axios.get(`${API}/auth/me`, { 
+          withCredentials: true,
+          timeout: 10000
+        });
         if (response.data) {
           navigate("/dashboard", { replace: true });
           return;
@@ -81,8 +88,9 @@ const Landing = () => {
 
     // Fetch featured items for preview
     const fetchItems = async () => {
+      if (!API) return;
       try {
-        const response = await axios.get(`${API}/items`);
+        const response = await axios.get(`${API}/items`, { timeout: 10000 });
         setFeaturedItems(response.data.slice(0, 6));
       } catch {
         // Ignore errors
@@ -94,19 +102,40 @@ const Landing = () => {
   }, [navigate]);
 
   const handleGoogleSignIn = async (response) => {
+    if (!API) {
+      console.error('API URL not configured');
+      alert('Backend URL not configured. Please check environment variables.');
+      return;
+    }
+
     try {
       // Send the credential to backend
       const authResponse = await axios.post(
         `${API}/auth/google`,
         { credential: response.credential },
-        { withCredentials: true }
+        { 
+          withCredentials: true,
+          timeout: 15000 // 15 second timeout
+        }
       );
 
-      if (authResponse.data.user) {
-        navigate("/dashboard", { replace: true });
+      if (authResponse.data && authResponse.data.user) {
+        // Small delay to ensure cookie is set
+        setTimeout(() => {
+          navigate("/dashboard", { replace: true });
+        }, 100);
+      } else {
+        console.error('No user data in auth response');
+        alert('Authentication failed. Please try again.');
       }
     } catch (error) {
       console.error("Auth error:", error);
+      if (error.response) {
+        console.error("Error response:", error.response.data);
+        alert(`Authentication failed: ${error.response.data?.detail || error.message}`);
+      } else {
+        alert('Network error. Please check your connection and try again.');
+      }
     }
   };
 

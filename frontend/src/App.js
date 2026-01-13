@@ -14,7 +14,7 @@ import PostItem from "@/pages/PostItem";
 import MyItems from "@/pages/MyItems";
 import Trades from "@/pages/Trades";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://swapflow-app-uj7o.vercel.app';
 const API = `${BACKEND_URL}/api`;
 
 // Auth Context
@@ -44,10 +44,25 @@ const ProtectedRoute = ({ children }) => {
     }
 
     const checkAuth = async () => {
+      if (!API) {
+        console.error('API URL not configured');
+        setIsLoading(false);
+        navigate("/", { replace: true });
+        return;
+      }
+
       try {
-        const response = await axios.get(`${API}/auth/me`, { withCredentials: true });
-        setUser(response.data);
+        const response = await axios.get(`${API}/auth/me`, { 
+          withCredentials: true,
+          timeout: 10000 // 10 second timeout
+        });
+        if (response.data) {
+          setUser(response.data);
+        } else {
+          navigate("/", { replace: true });
+        }
       } catch (error) {
+        console.error('Auth check failed:', error);
         navigate("/", { replace: true });
       } finally {
         setIsLoading(false);
@@ -55,7 +70,7 @@ const ProtectedRoute = ({ children }) => {
     };
 
     checkAuth();
-  }, [navigate, setUser, user, setIsLoading]);
+  }, [navigate, setUser, user, setIsLoading, API]);
 
   if (isLoading) {
     return (
