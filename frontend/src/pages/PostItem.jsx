@@ -85,10 +85,6 @@ const PostItem = () => {
         headers['Authorization'] = `Bearer ${sessionToken}`;
       }
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'PostItem.jsx:80',message:'Posting item',data:{url:`${API}/items`,hasStoredToken:!!sessionToken,hasCookie:document.cookie.includes('session_token')},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
-      // #endregion
-
       await axios.post(
         `${API}/items`,
         {
@@ -103,15 +99,9 @@ const PostItem = () => {
         }
       );
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'PostItem.jsx:97',message:'Item posted successfully',data:{},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
-      // #endregion
       toast.success("Item posted successfully!");
       navigate("/dashboard");
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'PostItem.jsx:100',message:'Post item error',data:{errorMessage:error.message,statusCode:error.response?.status,responseData:error.response?.data},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
-      // #endregion
       toast.error(error.response?.data?.detail || "Failed to post item");
     } finally {
       setIsLoading(false);
