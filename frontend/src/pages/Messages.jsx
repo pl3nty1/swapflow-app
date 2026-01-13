@@ -129,6 +129,10 @@ const Messages = () => {
             const data = JSON.parse(event.data);
             if (data.type === "new_message") {
               const newMsg = data.message;
+              
+              // Always refresh conversations list to show new messages
+              fetchConversations();
+              
               // Add message if it's for current conversation
               if (partnerId && (newMsg.sender_id === partnerId || newMsg.receiver_id === partnerId)) {
                 setMessages((prev) => {
@@ -158,9 +162,11 @@ const Messages = () => {
                   };
                   markAsRead();
                 }
+              } else if (newMsg.receiver_id === user?.user_id) {
+                // If message is for us but we're not in that conversation, just refresh conversations
+                // This ensures the conversation list updates with new messages
+                fetchConversations();
               }
-              // Refresh conversations to update unread counts
-              fetchConversations();
             }
           } catch (error) {
             console.error("Failed to parse WebSocket message:", error);
@@ -294,27 +300,20 @@ const Messages = () => {
                       data-testid={`conversation-${conv.partner.user_id}`}
                     >
                       <div className="flex items-center gap-3">
-                        <div className="relative">
-                          <Avatar className="h-10 w-10">
-                            <AvatarImage src={conv.partner.picture} alt={conv.partner.name} />
-                            <AvatarFallback className="bg-indigo-100 text-indigo-600">
-                              {getInitials(conv.partner.name)}
-                            </AvatarFallback>
-                          </Avatar>
-                          {hasUnread && (
-                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white flex items-center justify-center">
-                              <span className="text-xs text-white font-bold">{unreadCount > 9 ? "9+" : unreadCount}</span>
-                            </div>
-                          )}
-                        </div>
+                        <Avatar className="h-10 w-10">
+                          <AvatarImage src={conv.partner.picture} alt={conv.partner.name} />
+                          <AvatarFallback className="bg-indigo-100 text-indigo-600">
+                            {getInitials(conv.partner.name)}
+                          </AvatarFallback>
+                        </Avatar>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <p className={`font-medium truncate ${hasUnread ? "font-semibold" : ""}`}>
-                              {conv.partner.username || conv.partner.name}
-                            </p>
                             {hasUnread && (
                               <div className="w-2 h-2 bg-red-500 rounded-full flex-shrink-0" />
                             )}
+                            <p className={`font-medium truncate ${hasUnread ? "font-semibold" : ""}`}>
+                              {conv.partner.username || conv.partner.name}
+                            </p>
                           </div>
                           <p className={`text-sm truncate ${hasUnread ? "text-slate-900 font-medium" : "text-slate-500"}`}>
                             {conv.last_message}
