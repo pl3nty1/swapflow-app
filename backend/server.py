@@ -149,14 +149,40 @@ class RatingCreate(BaseModel):
 
 async def get_current_user(request: Request) -> User:
     """Get current user from session token in cookie or Authorization header"""
+    # #region agent log
+    import json
+    import time
+    try:
+        cookies = dict(request.cookies)
+        auth_header = request.headers.get("Authorization")
+        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"server.py:150","message":"get_current_user called","data":{"hasSessionCookie":"session_token" in cookies,"hasAuthHeader":bool(auth_header),"authHeaderPreview":auth_header[:30]+"..." if auth_header else None,"allCookies":list(cookies.keys()),"origin":request.headers.get("origin"),"path":str(request.url.path)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+    except:
+        pass
+    # #endregion
+
     session_token = request.cookies.get("session_token")
     
     if not session_token:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             session_token = auth_header[7:]
+            # #region agent log
+            try:
+                with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"location":"server.py:162","message":"Using Bearer token from header","data":{"tokenPreview":session_token[:20]+"..."},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+            except:
+                pass
+            # #endregion
     
     if not session_token:
+        # #region agent log
+        try:
+            with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"location":"server.py:170","message":"No session token found","data":{},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+        except:
+            pass
+        # #endregion
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     session = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
