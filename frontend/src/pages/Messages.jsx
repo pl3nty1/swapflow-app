@@ -163,9 +163,7 @@ const Messages = () => {
               // Always refresh conversations list to show updated last message and unread counts
               // This ensures the list updates live even when just viewing the conversations
               fetchConversations();
-                // This ensures the conversation list updates with new messages
-                fetchConversations();
-              }
+            }
             }
           } catch (error) {
             console.error("Failed to parse WebSocket message:", error);
