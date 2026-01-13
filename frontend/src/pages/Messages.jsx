@@ -300,6 +300,9 @@ const Messages = () => {
                       data-testid={`conversation-${conv.partner.user_id}`}
                     >
                       <div className="flex items-center gap-3">
+                        {hasUnread && (
+                          <div className="w-2 h-2 bg-red-500 rounded-full flex-shrink-0" />
+                        )}
                         <Avatar className="h-10 w-10">
                           <AvatarImage src={conv.partner.picture} alt={conv.partner.name} />
                           <AvatarFallback className="bg-indigo-100 text-indigo-600">
@@ -316,9 +319,6 @@ const Messages = () => {
                             {conv.last_message}
                           </p>
                         </div>
-                        {hasUnread && (
-                          <div className="w-2 h-2 bg-red-500 rounded-full flex-shrink-0" />
-                        )}
                       </div>
                     </div>
                   );
