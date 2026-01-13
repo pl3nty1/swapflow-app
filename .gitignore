@@ -78,6 +78,17 @@ agenthub/agents/youtube/db
 
 # Mobile development
 android-sdk/ -e 
+
 # Environment files
 *.env
 *.env.*
+# Keep .env.example files if needed
+!*.env.example
+
+# Cursor debug logs
+.cursor/debug.log
+# Keep .env.example files
+!*.env.example
+
+# Cursor debug logs
+.cursor/debug.log
