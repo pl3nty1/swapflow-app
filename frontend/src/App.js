@@ -14,7 +14,7 @@ import PostItem from "@/pages/PostItem";
 import MyItems from "@/pages/MyItems";
 import Trades from "@/pages/Trades";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://swapflow-app-uj7o.vercel.app';
+const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://swapflow-app-uj7o.vercel.app').replace(/\/+$/, ''); // Remove trailing slashes
 const API = `${BACKEND_URL}/api`;
 
 // Auth Context
@@ -44,6 +44,10 @@ const ProtectedRoute = ({ children }) => {
     }
 
     const checkAuth = async () => {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.js:46',message:'ProtectedRoute checkAuth called',data:{API,cookies:document.cookie},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H2"})}).catch(()=>{});
+      // #endregion
+
       if (!API) {
         console.error('API URL not configured');
         setIsLoading(false);
@@ -52,16 +56,28 @@ const ProtectedRoute = ({ children }) => {
       }
 
       try {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.js:54',message:'Sending /auth/me request',data:{url:`${API}/auth/me`},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H2"})}).catch(()=>{});
+        // #endregion
+
         const response = await axios.get(`${API}/auth/me`, { 
           withCredentials: true,
           timeout: 10000 // 10 second timeout
         });
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.js:59',message:'/auth/me response received',data:{status:response.status,hasData:!!response.data,userId:response.data?.user_id},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H2"})}).catch(()=>{});
+        // #endregion
+
         if (response.data) {
           setUser(response.data);
         } else {
           navigate("/", { replace: true });
         }
       } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.js:64',message:'/auth/me error',data:{errorMessage:error.message,statusCode:error.response?.status,responseData:error.response?.data,isTimeout:error.code==='ECONNABORTED'},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H2"})}).catch(()=>{});
+        // #endregion
         console.error('Auth check failed:', error);
         navigate("/", { replace: true });
       } finally {

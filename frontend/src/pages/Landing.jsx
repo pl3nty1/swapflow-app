@@ -4,7 +4,7 @@ import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { ArrowLeftRight, ArrowRight, Star, Users, Shield } from "lucide-react";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://swapflow-app-uj7o.vercel.app';
+const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://swapflow-app-uj7o.vercel.app').replace(/\/+$/, ''); // Remove trailing slashes
 const API = `${BACKEND_URL}/api`;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '230390770808-2u6f0s330fntsf8878mukt32a9crmqro.apps.googleusercontent.com';
 
