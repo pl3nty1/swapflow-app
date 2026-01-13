@@ -124,7 +124,7 @@ const Messages = () => {
           console.log("WebSocket connected");
         };
 
-        ws.onmessage = (event) => {
+        ws.onmessage = async (event) => {
           try {
             const data = JSON.parse(event.data);
             if (data.type === "new_message") {
@@ -138,6 +138,26 @@ const Messages = () => {
                   }
                   return [...prev, newMsg];
                 });
+                
+                // If we're viewing this conversation, mark the message as read immediately
+                if (newMsg.sender_id === partnerId && newMsg.receiver_id === user?.user_id) {
+                  const markAsRead = async () => {
+                    try {
+                      const headers = getAuthHeaders();
+                      await axios.post(
+                        `${API}/messages/${partnerId}/mark-read`,
+                        {},
+                        { withCredentials: true, headers: headers }
+                      );
+                      // Dispatch event to notify Header to refresh unread count
+                      window.dispatchEvent(new CustomEvent('messagesRead'));
+                      fetchConversations(); // Refresh to update unread counts
+                    } catch (error) {
+                      console.error("Failed to mark message as read:", error);
+                    }
+                  };
+                  markAsRead();
+                }
               }
               // Refresh conversations to update unread counts
               fetchConversations();
@@ -168,7 +188,7 @@ const Messages = () => {
         wsRef.current.close();
       }
     };
-  }, [API, partnerId, fetchConversations]);
+  }, [API, partnerId, fetchConversations, user, getAuthHeaders]);
 
   useEffect(() => {
     // Auto-scroll to bottom
