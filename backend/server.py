@@ -10,9 +10,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
-import httpx
 import base64
-import aiofiles
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
@@ -151,14 +149,8 @@ async def get_optional_user(request: Request) -> Optional[User]:
 @api_router.post("/auth/google")
 async def google_auth(request: Request, response: Response):
     """Authenticate with Google OAuth ID token"""
-    import json
     body = await request.json()
     credential = body.get("credential")  # Google ID token
-    
-    # #region agent log
-    with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({"location":"server.py:155","message":"Auth endpoint called","data":{"hasCredential":bool(credential),"credentialLength":len(credential) if credential else 0,"credentialPreview":credential[:50]+"..." if credential else None},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
-    # #endregion
     
     if not credential:
         raise HTTPException(status_code=400, detail="Credential required")
@@ -166,27 +158,14 @@ async def google_auth(request: Request, response: Response):
     try:
         # Verify the Google ID token
         GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
-        # #region agent log
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:163","message":"Backend Client ID check","data":{"GOOGLE_CLIENT_ID":GOOGLE_CLIENT_ID,"GOOGLE_CLIENT_ID_length":len(GOOGLE_CLIENT_ID) if GOOGLE_CLIENT_ID else 0,"GOOGLE_CLIENT_ID_preview":GOOGLE_CLIENT_ID[:30]+"..." if GOOGLE_CLIENT_ID else None},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
-        # #endregion
         if not GOOGLE_CLIENT_ID:
             raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured")
         
-        # #region agent log
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:166","message":"Verifying token","data":{"clientId":GOOGLE_CLIENT_ID[:30]+"...","credentialLength":len(credential)},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
-        # #endregion
         idinfo = id_token.verify_oauth2_token(
             credential, 
             google_requests.Request(), 
             GOOGLE_CLIENT_ID
         )
-        
-        # #region agent log
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:173","message":"Token verified successfully","data":{"email":idinfo.get('email'),"name":idinfo.get('name')},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-        # #endregion
         
         # Extract user info
         email = idinfo['email']
@@ -194,43 +173,18 @@ async def google_auth(request: Request, response: Response):
         picture = idinfo.get('picture')
         
     except ValueError as e:
-        # #region agent log
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:177","message":"Token verification failed","data":{"error":str(e),"errorType":type(e).__name__},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-        # #endregion
         raise HTTPException(status_code=401, detail="Invalid Google token")
     except Exception as e:
-        # #region agent log
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:196","message":"Unexpected error during token verification","data":{"error":str(e),"errorType":type(e).__name__,"errorTraceback":str(e.__traceback__)},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-        # #endregion
         raise HTTPException(status_code=500, detail=f"Authentication error: {str(e)}")
     
-    # #region agent log
-    with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({"location":"server.py:203","message":"Checking if user exists in database","data":{"email":email},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-    # #endregion
     # Check if user exists
     try:
         existing_user = await db.users.find_one({"email": email}, {"_id": 0})
     except Exception as e:
-        # #region agent log
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:207","message":"Database error checking user","data":{"error":str(e),"errorType":type(e).__name__},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-        # #endregion
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    
-    # #region agent log
-    with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({"location":"server.py:215","message":"User lookup result","data":{"hasExistingUser":bool(existing_user),"user_id":existing_user.get("user_id") if existing_user else None},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-    # #endregion
     
     if existing_user:
         user_id = existing_user["user_id"]
-        # #region agent log
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:220","message":"Updating existing user","data":{"user_id":user_id},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-        # #endregion
         # Update user info if needed
         try:
             await db.users.update_one(
@@ -241,16 +195,8 @@ async def google_auth(request: Request, response: Response):
                 }}
             )
         except Exception as e:
-            # #region agent log
-            with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"location":"server.py:230","message":"Database error updating user","data":{"error":str(e),"errorType":type(e).__name__},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-            # #endregion
             raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     else:
-        # #region agent log
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:235","message":"Creating new user","data":{"email":email},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-        # #endregion
         # Create new user
         user_id = f"user_{uuid.uuid4().hex[:12]}"
         new_user = {
@@ -267,16 +213,8 @@ async def google_auth(request: Request, response: Response):
         try:
             await db.users.insert_one(new_user)
         except Exception as e:
-            # #region agent log
-            with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"location":"server.py:250","message":"Database error creating user","data":{"error":str(e),"errorType":type(e).__name__},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-            # #endregion
             raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
-    # #region agent log
-    with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({"location":"server.py:255","message":"Creating session","data":{"user_id":user_id},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-    # #endregion
     # Create session
     session_token = f"sess_{uuid.uuid4().hex}"
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
@@ -289,16 +227,8 @@ async def google_auth(request: Request, response: Response):
             "created_at": datetime.now(timezone.utc).isoformat()
         })
     except Exception as e:
-        # #region agent log
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:265","message":"Database error creating session","data":{"error":str(e),"errorType":type(e).__name__},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-        # #endregion
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
-    # #region agent log
-    with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({"location":"server.py:270","message":"Setting cookie and returning response","data":{"session_token":session_token[:20]+"..."},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-    # #endregion
     # Set cookie
     response.set_cookie(
         key="session_token",
@@ -314,16 +244,8 @@ async def google_auth(request: Request, response: Response):
     try:
         user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     except Exception as e:
-        # #region agent log
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:285","message":"Database error fetching user","data":{"error":str(e),"errorType":type(e).__name__},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-        # #endregion
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
-    # #region agent log
-    with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({"location":"server.py:290","message":"Auth endpoint success","data":{"user_id":user_id,"hasUser":bool(user)},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run2","hypothesisId":"E"})+"\n")
-    # #endregion
     return {"user": user, "session_token": session_token}
 
 @api_router.get("/auth/me")

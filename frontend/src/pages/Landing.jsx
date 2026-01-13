@@ -8,28 +8,17 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 
-// #region agent log
-fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:9',message:'Environment variables loaded',data:{BACKEND_URL,BACKEND_URL_type:typeof BACKEND_URL,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_ID_type:typeof GOOGLE_CLIENT_ID,GOOGLE_CLIENT_ID_length:GOOGLE_CLIENT_ID?.length,isPlaceholder:GOOGLE_CLIENT_ID?.includes('your_google_client_id'),startsWithCorrect:GOOGLE_CLIENT_ID?.startsWith('230390770808'),first30Chars:GOOGLE_CLIENT_ID?.substring(0,30)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'1,4'})}).catch(()=>{});
-// #endregion
-
 const Landing = () => {
   const navigate = useNavigate();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [featuredItems, setFeaturedItems] = useState([]);
 
   useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:16',message:'useEffect started',data:{hash:window.location.hash,hasIdToken:window.location.hash.includes('id_token=')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
-    
     // Check for OAuth callback (ID token in URL hash)
     const hash = window.location.hash;
     if (hash && hash.includes('id_token=')) {
       const params = new URLSearchParams(hash.substring(1));
       const idToken = params.get('id_token');
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:22',message:'OAuth callback detected',data:{hash,idToken:idToken?.substring(0,50)+'...',idTokenLength:idToken?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       if (idToken) {
         console.log('Found ID token in URL, processing...');
         handleGoogleSignIn({ credential: idToken });
@@ -41,23 +30,14 @@ const Landing = () => {
 
     // Wait for Google script to load, then initialize
     const initGoogleSignIn = () => {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:32',message:'initGoogleSignIn called',data:{hasGoogle:!!window.google,hasAccounts:!!(window.google?.accounts),hasId:!!(window.google?.accounts?.id),GOOGLE_CLIENT_ID,GOOGLE_CLIENT_ID_length:GOOGLE_CLIENT_ID?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       if (window.google && GOOGLE_CLIENT_ID) {
         try {
           window.google.accounts.id.initialize({
             client_id: GOOGLE_CLIENT_ID,
             callback: handleGoogleSignIn,
           });
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:39',message:'Google Sign-In initialized successfully',data:{clientId:GOOGLE_CLIENT_ID?.substring(0,30)+'...'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
           console.log('Google Sign-In initialized');
         } catch (error) {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:41',message:'Google Sign-In init error',data:{error:error.message,errorStack:error.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
           console.error('Error initializing Google Sign-In:', error);
         }
       }
@@ -65,21 +45,12 @@ const Landing = () => {
 
     // Check if Google script is already loaded
     if (window.google) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:47',message:'Google script already loaded',data:{hasGoogle:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       initGoogleSignIn();
     } else {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:50',message:'Google script not loaded, waiting',data:{hasGoogle:false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       // Wait for script to load
       const checkGoogle = setInterval(() => {
         if (window.google) {
           clearInterval(checkGoogle);
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:53',message:'Google script loaded after wait',data:{hasGoogle:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
           initGoogleSignIn();
         }
       }, 100);
@@ -88,9 +59,6 @@ const Landing = () => {
       setTimeout(() => {
         clearInterval(checkGoogle);
         if (!window.google) {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:62',message:'Google script timeout - not loaded',data:{hasGoogle:false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
           console.warn('Google Sign-In script did not load within 5 seconds');
         }
       }, 5000);
@@ -126,39 +94,23 @@ const Landing = () => {
   }, [navigate]);
 
   const handleGoogleSignIn = async (response) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:96',message:'handleGoogleSignIn called',data:{hasCredential:!!response?.credential,credentialLength:response?.credential?.length,credentialPreview:response?.credential?.substring(0,50)+'...'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     try {
       // Send the credential to backend
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:100',message:'Sending credential to backend',data:{apiUrl:`${API}/auth/google`,hasCredential:!!response?.credential},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       const authResponse = await axios.post(
         `${API}/auth/google`,
         { credential: response.credential },
         { withCredentials: true }
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:107',message:'Backend auth response received',data:{status:authResponse.status,hasUser:!!authResponse.data?.user,userId:authResponse.data?.user?.user_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
 
       if (authResponse.data.user) {
         navigate("/dashboard", { replace: true });
       }
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:109',message:'Backend auth error',data:{errorMessage:error.message,errorResponse:error.response?.data,statusCode:error.response?.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       console.error("Auth error:", error);
     }
   };
 
   const handleGoogleLogin = (e) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:113',message:'Button clicked',data:{GOOGLE_CLIENT_ID,GOOGLE_CLIENT_ID_type:typeof GOOGLE_CLIENT_ID,GOOGLE_CLIENT_ID_length:GOOGLE_CLIENT_ID?.length,hasGoogle:!!window.google,hasAccounts:!!(window.google?.accounts),hasId:!!(window.google?.accounts?.id)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-    
     // Prevent any default behavior
     if (e) {
       e.preventDefault();
@@ -178,9 +130,6 @@ const Landing = () => {
     
     // Check if Google Client ID is configured
     const clientId = GOOGLE_CLIENT_ID?.trim();
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:132',message:'Client ID validation',data:{clientId,clientIdLength:clientId?.length,isEmpty:!clientId || clientId === ''},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     if (!clientId || clientId === '') {
       alert('Google OAuth is not configured. Please set REACT_APP_GOOGLE_CLIENT_ID in your .env file.\n\nCurrent value: "' + (GOOGLE_CLIENT_ID || 'undefined') + '"\n\nSee SETUP_LOCAL.md for instructions on setting up Google OAuth.');
       console.error('Google Client ID not configured. Current value:', GOOGLE_CLIENT_ID, 'Type:', typeof GOOGLE_CLIENT_ID);
@@ -191,31 +140,19 @@ const Landing = () => {
 
     // Use Google Sign-In JavaScript API (doesn't require redirect URI)
     if (window.google && window.google.accounts && window.google.accounts.id) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:142',message:'Using Google Sign-In API',data:{hasGoogle:true,hasAccounts:true,hasId:true,clientId:clientId?.substring(0,30)+'...'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       try {
         console.log('Using Google Sign-In JavaScript API...');
         
         // Make sure it's initialized
         if (!window.google.accounts.id._initialized) {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:147',message:'Initializing Google Sign-In',data:{clientId:clientId?.substring(0,30)+'...',fullClientId:clientId,clientIdLength:clientId?.length,isPlaceholder:clientId?.includes('your_google_client_id'),startsWithCorrect:clientId?.startsWith('230390770808')},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'A,4'})}).catch(()=>{});
-          // #endregion
           window.google.accounts.id.initialize({
             client_id: clientId,
             callback: handleGoogleSignIn,
           });
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:152',message:'Google Sign-In initialized with Client ID',data:{clientIdUsed:clientId?.substring(0,50)+'...'},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
         }
         
         // Try to show the One Tap prompt
         window.google.accounts.id.prompt((notification) => {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:155',message:'Google prompt notification',data:{isNotDisplayed:notification.isNotDisplayed(),isSkippedMoment:notification.isSkippedMoment(),isDismissedMoment:notification.isDismissedMoment(),getNotDisplayedReason:notification.getNotDisplayedReason?.()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
           console.log('Google prompt notification:', notification);
           if (notification.isNotDisplayed() || notification.isSkippedMoment() || notification.isDismissedMoment()) {
             // If prompt doesn't show, render a button instead
@@ -233,31 +170,19 @@ const Landing = () => {
           }
         });
       } catch (error) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:172',message:'Google Sign-In API error',data:{errorMessage:error.message,errorStack:error.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         console.error('Error with Google Sign-In API:', error);
         // Fallback: use redirect (requires redirect URI to be configured)
         console.log('Falling back to redirect method...');
         const redirectUrl = window.location.origin;
         const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUrl)}&response_type=id_token&scope=openid email profile&nonce=${Math.random()}`;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:177',message:'Redirecting to Google OAuth',data:{redirectUrl,clientId,clientIdLength:clientId?.length,isPlaceholder:clientId?.includes('your_google_client_id'),startsWithCorrect:clientId?.startsWith('230390770808'),googleAuthUrl:googleAuthUrl.substring(0,150)+'...'},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'3,5'})}).catch(()=>{});
-        // #endregion
         window.location.href = googleAuthUrl;
       }
     } else {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:180',message:'Google script not available, using redirect',data:{hasGoogle:!!window.google,hasAccounts:!!(window.google?.accounts),hasId:!!(window.google?.accounts?.id),redirectUrl:window.location.origin},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       // Google script not loaded, use redirect (requires redirect URI to be configured)
       console.log('Google script not loaded, using redirect method...');
       console.warn('⚠️ Redirect method requires http://localhost:3000 to be added to Authorized redirect URIs in Google Cloud Console');
       const redirectUrl = window.location.origin;
       const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUrl)}&response_type=id_token&scope=openid email profile&nonce=${Math.random()}`;
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:186',message:'Redirecting to Google OAuth (fallback)',data:{redirectUrl,clientId,clientIdLength:clientId?.length,isPlaceholder:clientId?.includes('your_google_client_id'),startsWithCorrect:clientId?.startsWith('230390770808'),googleAuthUrl:googleAuthUrl.substring(0,150)+'...'},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'3,5'})}).catch(()=>{});
-      // #endregion
       window.location.href = googleAuthUrl;
     }
 
