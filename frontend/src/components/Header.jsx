@@ -52,6 +52,15 @@ export const Header = () => {
     }
   }, [location.pathname, fetchUnreadCount]);
 
+  // Listen for messages being marked as read
+  useEffect(() => {
+    const handleMessagesRead = () => {
+      fetchUnreadCount();
+    };
+    window.addEventListener('messagesRead', handleMessagesRead);
+    return () => window.removeEventListener('messagesRead', handleMessagesRead);
+  }, [fetchUnreadCount]);
+
   const getInitials = (name) => {
     if (!name) return "U";
     return name

@@ -96,6 +96,8 @@ const Messages = () => {
             { withCredentials: true, headers: headers }
           );
           fetchConversations(); // Refresh to update unread counts
+          // Dispatch event to notify Header to refresh unread count
+          window.dispatchEvent(new CustomEvent('messagesRead'));
         } catch (error) {
           console.error("Failed to mark messages as read:", error);
         }
