@@ -22,7 +22,7 @@ import { ArrowLeftRight, Edit2, Loader2 } from "lucide-react";
 
 const Profile = () => {
   const { userId } = useParams();
-  const { user: currentUser, setUser, API } = useAuth();
+  const { user: currentUser, setUser, API, getAuthHeaders } = useAuth();
   const [profileUser, setProfileUser] = useState(null);
   const [items, setItems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);

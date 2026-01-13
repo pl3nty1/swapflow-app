@@ -13,7 +13,7 @@ import { Send, Loader2, ArrowLeft, MessageCircle } from "lucide-react";
 const Messages = () => {
   const { partnerId } = useParams();
   const navigate = useNavigate();
-  const { user, API } = useAuth();
+  const { user, API, getAuthHeaders } = useAuth();
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
   const [partner, setPartner] = useState(null);
