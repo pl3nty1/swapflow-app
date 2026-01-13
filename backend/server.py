@@ -34,29 +34,41 @@ async def log_requests(request: Request, call_next):
     method = request.method
     path = str(request.url.path)
     # #region agent log
-    log_data = {"location": "server.py:30", "message": "incoming request", "data": {"method": method, "path": path, "query": str(request.url.query)}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "A"}
-    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
-        f.write(json.dumps(log_data) + "\n")
+    try:
+        log_data = {"location": "server.py:30", "message": "incoming request", "data": {"method": method, "path": path, "query": str(request.url.query)}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "A"}
+        with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+            f.write(json.dumps(log_data) + "\n")
+    except Exception:
+        pass  # Silently fail in serverless environments
     # #endregion
     try:
         response = await call_next(request)
     except Exception as e:
         # #region agent log
-        log_data = {"location": "server.py:41", "message": "request exception", "data": {"method": method, "path": path, "error": str(e), "errorType": type(e).__name__}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "E"}
-        with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
-            f.write(json.dumps(log_data) + "\n")
+        try:
+            log_data = {"location": "server.py:41", "message": "request exception", "data": {"method": method, "path": path, "error": str(e), "errorType": type(e).__name__}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "E"}
+            with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+                f.write(json.dumps(log_data) + "\n")
+        except Exception:
+            pass  # Silently fail in serverless environments
         # #endregion
         raise
     # #region agent log
-    log_data = {"location": "server.py:48", "message": "response sent", "data": {"method": method, "path": path, "status": response.status_code}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "A"}
-    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
-        f.write(json.dumps(log_data) + "\n")
+    try:
+        log_data = {"location": "server.py:48", "message": "response sent", "data": {"method": method, "path": path, "status": response.status_code}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "A"}
+        with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+            f.write(json.dumps(log_data) + "\n")
+    except Exception:
+        pass  # Silently fail in serverless environments
     # #endregion
     if response.status_code == 405:
         # #region agent log
-        log_data = {"location": "server.py:42", "message": "405 method not allowed", "data": {"method": method, "path": path, "allowedMethods": response.headers.get("allow", "unknown")}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "B"}
-        with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
-            f.write(json.dumps(log_data) + "\n")
+        try:
+            log_data = {"location": "server.py:42", "message": "405 method not allowed", "data": {"method": method, "path": path, "allowedMethods": response.headers.get("allow", "unknown")}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "B"}
+            with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+                f.write(json.dumps(log_data) + "\n")
+        except Exception:
+            pass  # Silently fail in serverless environments
         # #endregion
     return response
 
@@ -184,10 +196,13 @@ class RatingCreate(BaseModel):
 async def get_current_user(request: Request) -> User:
     """Get current user from session token in cookie or Authorization header"""
     # #region agent log
-    import json
-    log_data = {"location": "server.py:151", "message": "get_current_user entry", "data": {"hasCookie": "session_token" in request.cookies, "hasAuthHeader": "authorization" in [k.lower() for k in request.headers.keys()], "authHeader": request.headers.get("Authorization", "none")[:50] if request.headers.get("Authorization") else "none"}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "D"}
-    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
-        f.write(json.dumps(log_data) + "\n")
+    try:
+        import json
+        log_data = {"location": "server.py:151", "message": "get_current_user entry", "data": {"hasCookie": "session_token" in request.cookies, "hasAuthHeader": "authorization" in [k.lower() for k in request.headers.keys()], "authHeader": request.headers.get("Authorization", "none")[:50] if request.headers.get("Authorization") else "none"}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "D"}
+        with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+            f.write(json.dumps(log_data) + "\n")
+    except Exception:
+        pass  # Silently fail in serverless environments
     # #endregion
     session_token = request.cookies.get("session_token")
     
@@ -197,18 +212,24 @@ async def get_current_user(request: Request) -> User:
             session_token = auth_header[7:]
     
     # #region agent log
-    log_data = {"location": "server.py:160", "message": "session token extracted", "data": {"hasSessionToken": bool(session_token), "tokenLength": len(session_token) if session_token else 0}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "D"}
-    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
-        f.write(json.dumps(log_data) + "\n")
+    try:
+        log_data = {"location": "server.py:160", "message": "session token extracted", "data": {"hasSessionToken": bool(session_token), "tokenLength": len(session_token) if session_token else 0}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "D"}
+        with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+            f.write(json.dumps(log_data) + "\n")
+    except Exception:
+        pass  # Silently fail in serverless environments
     # #endregion
     if not session_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     session = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
     # #region agent log
-    log_data = {"location": "server.py:163", "message": "session lookup", "data": {"sessionFound": bool(session)}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "E"}
-    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
-        f.write(json.dumps(log_data) + "\n")
+    try:
+        log_data = {"location": "server.py:163", "message": "session lookup", "data": {"sessionFound": bool(session)}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "E"}
+        with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+            f.write(json.dumps(log_data) + "\n")
+    except Exception:
+        pass  # Silently fail in serverless environments
     # #endregion
     if not session:
         raise HTTPException(status_code=401, detail="Invalid session")
@@ -219,9 +240,12 @@ async def get_current_user(request: Request) -> User:
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     # #region agent log
-    log_data = {"location": "server.py:172", "message": "session expiry check", "data": {"expiresAt": str(expires_at), "isExpired": expires_at < datetime.now(timezone.utc)}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "E"}
-    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
-        f.write(json.dumps(log_data) + "\n")
+    try:
+        log_data = {"location": "server.py:172", "message": "session expiry check", "data": {"expiresAt": str(expires_at), "isExpired": expires_at < datetime.now(timezone.utc)}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "E"}
+        with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+            f.write(json.dumps(log_data) + "\n")
+    except Exception:
+        pass  # Silently fail in serverless environments
     # #endregion
     if expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Session expired")
@@ -956,14 +980,17 @@ async def root():
 app.include_router(api_router)
 # #region agent log
 import json
-# Log all registered routes
-routes = []
-for route in app.routes:
-    if hasattr(route, 'methods') and hasattr(route, 'path'):
-        routes.append({"methods": list(route.methods), "path": route.path})
-log_data = {"location": "server.py:950", "message": "routes registered", "data": {"routeCount": len(routes), "routes": routes[:20]}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "C"}
-with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
-    f.write(json.dumps(log_data) + "\n")
+# Log all registered routes (safe for serverless)
+try:
+    routes = []
+    for route in app.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            routes.append({"methods": list(route.methods), "path": route.path})
+    log_data = {"location": "server.py:950", "message": "routes registered", "data": {"routeCount": len(routes), "routes": routes[:20]}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "C"}
+    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+        f.write(json.dumps(log_data) + "\n")
+except Exception:
+    pass  # Silently fail in serverless environments
 # #endregion
 
 # CORS configuration
@@ -975,10 +1002,13 @@ cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
 @app.options("/{full_path:path}")
 async def options_handler(full_path: str):
     # #region agent log
-    import json
-    log_data = {"location": "server.py:936", "message": "OPTIONS request handled", "data": {"path": full_path}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "D"}
-    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
-        f.write(json.dumps(log_data) + "\n")
+    try:
+        import json
+        log_data = {"location": "server.py:936", "message": "OPTIONS request handled", "data": {"path": full_path}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "D"}
+        with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+            f.write(json.dumps(log_data) + "\n")
+    except Exception:
+        pass  # Silently fail in serverless environments
     # #endregion
     return Response(status_code=200)
 
