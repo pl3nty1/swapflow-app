@@ -27,6 +27,39 @@ logger = logging.getLogger(__name__)
 # Create the main app
 app = FastAPI()
 
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    import json
+    method = request.method
+    path = str(request.url.path)
+    # #region agent log
+    log_data = {"location": "server.py:30", "message": "incoming request", "data": {"method": method, "path": path, "query": str(request.url.query)}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "A"}
+    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+        f.write(json.dumps(log_data) + "\n")
+    # #endregion
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        # #region agent log
+        log_data = {"location": "server.py:41", "message": "request exception", "data": {"method": method, "path": path, "error": str(e), "errorType": type(e).__name__}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "E"}
+        with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+            f.write(json.dumps(log_data) + "\n")
+        # #endregion
+        raise
+    # #region agent log
+    log_data = {"location": "server.py:48", "message": "response sent", "data": {"method": method, "path": path, "status": response.status_code}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "A"}
+    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+        f.write(json.dumps(log_data) + "\n")
+    # #endregion
+    if response.status_code == 405:
+        # #region agent log
+        log_data = {"location": "server.py:42", "message": "405 method not allowed", "data": {"method": method, "path": path, "allowedMethods": response.headers.get("allow", "unknown")}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "B"}
+        with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+            f.write(json.dumps(log_data) + "\n")
+        # #endregion
+    return response
+
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
@@ -921,6 +954,17 @@ async def root():
 
 # Include the router in the main app
 app.include_router(api_router)
+# #region agent log
+import json
+# Log all registered routes
+routes = []
+for route in app.routes:
+    if hasattr(route, 'methods') and hasattr(route, 'path'):
+        routes.append({"methods": list(route.methods), "path": route.path})
+log_data = {"location": "server.py:950", "message": "routes registered", "data": {"routeCount": len(routes), "routes": routes[:20]}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "C"}
+with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+    f.write(json.dumps(log_data) + "\n")
+# #endregion
 
 # CORS configuration
 cors_origins = os.environ.get('CORS_ORIGINS', 'https://swapflow-app.vercel.app').split(',')
@@ -930,6 +974,12 @@ cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
 # Add explicit OPTIONS handler for CORS preflight
 @app.options("/{full_path:path}")
 async def options_handler(full_path: str):
+    # #region agent log
+    import json
+    log_data = {"location": "server.py:936", "message": "OPTIONS request handled", "data": {"path": full_path}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "D"}
+    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+        f.write(json.dumps(log_data) + "\n")
+    # #endregion
     return Response(status_code=200)
 
 app.add_middleware(
