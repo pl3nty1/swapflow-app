@@ -345,8 +345,18 @@ async def google_auth(request: Request, response: Response):
     return {"user": user, "session_token": session_token}
 
 @api_router.get("/auth/me")
-async def get_me(user: User = Depends(get_current_user)):
+async def get_me(request: Request, user: User = Depends(get_current_user)):
     """Get current authenticated user"""
+    # #region agent log
+    import json
+    import time
+    try:
+        cookies = dict(request.cookies)
+        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"server.py:347","message":"/auth/me endpoint called","data":{"hasSessionCookie":"session_token" in cookies,"allCookies":list(cookies.keys()),"origin":request.headers.get("origin"),"userId":user.user_id if user else None},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H2"})+"\n")
+    except Exception as e:
+        logger.error(f"Failed to write debug log: {str(e)}")
+    # #endregion
     return user.model_dump()
 
 @api_router.post("/auth/logout")

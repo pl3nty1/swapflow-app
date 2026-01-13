@@ -133,12 +133,15 @@ const Landing = () => {
 
       if (authResponse.data && authResponse.data.user) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:124',message:'Navigating to dashboard',data:{userId:authResponse.data.user.user_id},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:134',message:'Auth successful, checking cookies before navigation',data:{userId:authResponse.data.user.user_id,cookies:document.cookie,hasSessionCookie:document.cookie.includes('session_token')},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
         // #endregion
         // Small delay to ensure cookie is set
         setTimeout(() => {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:139',message:'Navigating to dashboard',data:{cookies:document.cookie},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
+          // #endregion
           navigate("/dashboard", { replace: true });
-        }, 100);
+        }, 500); // Increased delay to ensure cookie is set
       } else {
         console.error('No user data in auth response');
         alert('Authentication failed. Please try again.');
