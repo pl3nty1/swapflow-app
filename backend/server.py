@@ -17,20 +17,12 @@ from google.oauth2 import id_token
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection with error handling
-mongo_url = os.environ.get('MONGO_URL')
-db_name = os.environ.get('DB_NAME', 'swapflow')
-
-if not mongo_url:
-    raise ValueError("MONGO_URL environment variable is not set. Please configure it in Vercel.")
-
-try:
-    client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
-    db = client[db_name]
-    logger.info(f"Connected to MongoDB database: {db_name}")
-except Exception as e:
-    logger.error(f"Failed to connect to MongoDB: {str(e)}")
-    raise
+# Configure logging FIRST
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Create the main app
 app = FastAPI()
@@ -38,18 +30,50 @@ app = FastAPI()
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# MongoDB connection - lazy initialization for serverless
+_client = None
+_db = None
+
+def get_db():
+    """Get MongoDB database connection (lazy initialization)"""
+    global _client, _db
+    
+    if _db is not None:
+        return _db
+    
+    mongo_url = os.environ.get('MONGO_URL')
+    db_name = os.environ.get('DB_NAME', 'swapflow')
+    
+    if not mongo_url:
+        raise ValueError("MONGO_URL environment variable is not set. Please configure it in Vercel.")
+    
+    try:
+        _client = AsyncIOMotorClient(
+            mongo_url, 
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
+            socketTimeoutMS=10000
+        )
+        _db = _client[db_name]
+        logger.info(f"Connected to MongoDB database: {db_name}")
+        return _db
+    except Exception as e:
+        logger.error(f"Failed to connect to MongoDB: {str(e)}")
+        raise
 
 # Log environment variable status (without exposing secrets)
 logger.info(f"MONGO_URL configured: {bool(os.environ.get('MONGO_URL'))}")
 logger.info(f"DB_NAME: {os.environ.get('DB_NAME', 'swapflow')}")
 logger.info(f"GOOGLE_CLIENT_ID configured: {bool(os.environ.get('GOOGLE_CLIENT_ID'))}")
 logger.info(f"CORS_ORIGINS: {os.environ.get('CORS_ORIGINS', 'default')}")
+
+# Initialize db on first access (for backward compatibility)
+class DatabaseProxy:
+    def __getattr__(self, name):
+        db = get_db()
+        return getattr(db, name)
+
+db = DatabaseProxy()
 
 # ============== MODELS ==============
 
@@ -681,7 +705,8 @@ async def root():
     """Health check endpoint"""
     try:
         # Test MongoDB connection
-        await client.admin.command('ping')
+        db = get_db()
+        await _client.admin.command('ping')
         return {
             "message": "SwapFlow API",
             "status": "healthy",
@@ -714,4 +739,6 @@ app.add_middleware(
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    global _client
+    if _client:
+        _client.close()
