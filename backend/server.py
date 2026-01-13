@@ -197,6 +197,10 @@ async def get_current_user(request: Request) -> User:
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     
+    # Ensure is_admin field is present for backward compatibility
+    if "is_admin" not in user:
+        user["is_admin"] = False
+    
     return User(**user)
 
 async def get_optional_user(request: Request) -> Optional[User]:
@@ -359,6 +363,9 @@ async def get_user(user_id: str):
     user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    # Ensure is_admin field is present for backward compatibility
+    if "is_admin" not in user:
+        user["is_admin"] = False
     return user
 
 @api_router.put("/users/profile")
