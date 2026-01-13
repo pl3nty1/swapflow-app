@@ -164,7 +164,6 @@ const Messages = () => {
               // This ensures the list updates live even when just viewing the conversations
               fetchConversations();
             }
-            }
           } catch (error) {
             console.error("Failed to parse WebSocket message:", error);
           }
@@ -300,7 +299,6 @@ const Messages = () => {
                         {hasUnread && (
                           <div className="w-2 h-2 bg-red-500 rounded-full flex-shrink-0" />
                         )}
-                      <div className="flex items-center gap-3">
                         <Avatar className="h-10 w-10">
                           <AvatarImage src={conv.partner.picture} alt={conv.partner.name} />
                           <AvatarFallback className="bg-indigo-100 text-indigo-600">
@@ -312,7 +310,6 @@ const Messages = () => {
                             <p className={`font-medium truncate ${hasUnread ? "font-semibold" : ""}`}>
                               {conv.partner.username || conv.partner.name}
                             </p>
-                          
                           </div>
                           <p className={`text-sm truncate ${hasUnread ? "text-slate-900 font-medium" : "text-slate-500"}`}>
                             {conv.last_message}
