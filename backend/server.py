@@ -149,17 +149,6 @@ class RatingCreate(BaseModel):
 
 async def get_current_user(request: Request) -> User:
     """Get current user from session token in cookie or Authorization header"""
-    # #region agent log
-    import json
-    import time
-    try:
-        cookies = dict(request.cookies)
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:150","message":"get_current_user called","data":{"hasSessionCookie":"session_token" in cookies,"allCookies":list(cookies.keys()),"origin":request.headers.get("origin")},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H2"})+"\n")
-    except:
-        pass
-    # #endregion
-
     session_token = request.cookies.get("session_token")
     
     if not session_token:
@@ -168,13 +157,6 @@ async def get_current_user(request: Request) -> User:
             session_token = auth_header[7:]
     
     if not session_token:
-        # #region agent log
-        try:
-            with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"location":"server.py:160","message":"No session token found","data":{},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H2"})+"\n")
-        except:
-            pass
-        # #endregion
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     session = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
@@ -345,18 +327,8 @@ async def google_auth(request: Request, response: Response):
     return {"user": user, "session_token": session_token}
 
 @api_router.get("/auth/me")
-async def get_me(request: Request, user: User = Depends(get_current_user)):
+async def get_me(user: User = Depends(get_current_user)):
     """Get current authenticated user"""
-    # #region agent log
-    import json
-    import time
-    try:
-        cookies = dict(request.cookies)
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:347","message":"/auth/me endpoint called","data":{"hasSessionCookie":"session_token" in cookies,"allCookies":list(cookies.keys()),"origin":request.headers.get("origin"),"userId":user.user_id if user else None},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H2"})+"\n")
-    except Exception as e:
-        logger.error(f"Failed to write debug log: {str(e)}")
-    # #endregion
     return user.model_dump()
 
 @api_router.post("/auth/logout")

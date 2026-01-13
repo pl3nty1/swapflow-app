@@ -102,10 +102,6 @@ const Landing = () => {
   }, [navigate]);
 
   const handleGoogleSignIn = async (response) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:104',message:'handleGoogleSignIn called',data:{hasCredential:!!response?.credential,credentialLength:response?.credential?.length,API,API_type:typeof API},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
-    // #endregion
-
     if (!API) {
       console.error('API URL not configured');
       alert('Backend URL not configured. Please check environment variables.');
@@ -113,10 +109,6 @@ const Landing = () => {
     }
 
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:112',message:'Sending auth request',data:{url:`${API}/auth/google`,hasCredential:!!response?.credential},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
-      // #endregion
-
       // Send the credential to backend
       const authResponse = await axios.post(
         `${API}/auth/google`,
@@ -127,26 +119,16 @@ const Landing = () => {
         }
       );
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:122',message:'Auth response received',data:{status:authResponse.status,hasUser:!!authResponse.data?.user,userId:authResponse.data?.user?.user_id,hasSessionToken:!!authResponse.data?.session_token,cookies:document.cookie},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
-      // #endregion
-
       if (authResponse.data && authResponse.data.user) {
         // Store session token as fallback if cookie doesn't work
         if (authResponse.data.session_token) {
           localStorage.setItem('session_token', authResponse.data.session_token);
         }
         
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:134',message:'Auth successful, checking cookies before navigation',data:{userId:authResponse.data.user.user_id,cookies:document.cookie,hasSessionCookie:document.cookie.includes('session_token'),hasStoredToken:!!localStorage.getItem('session_token')},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
-        // #endregion
         // Small delay to ensure cookie is set
         setTimeout(() => {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:142',message:'Navigating to dashboard',data:{cookies:document.cookie},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
-          // #endregion
           navigate("/dashboard", { replace: true });
-        }, 500); // Increased delay to ensure cookie is set
+        }, 500);
       } else {
         console.error('No user data in auth response');
         alert('Authentication failed. Please try again.');
