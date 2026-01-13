@@ -11,13 +11,7 @@
       "src": "/(.*)",
       "dest": "server.py"
     }
-  ],
-  "env": {
-    "MONGO_URL": "@mongo_url",
-    "DB_NAME": "@db_name",
-    "GOOGLE_CLIENT_ID": "@google_client_id",
-    "CORS_ORIGINS": "@cors_origins"
-  }
+  ]
 }
 
 

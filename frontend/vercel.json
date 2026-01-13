@@ -9,11 +9,7 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ],
-  "env": {
-    "REACT_APP_BACKEND_URL": "@backend_url",
-    "REACT_APP_GOOGLE_CLIENT_ID": "@google_client_id"
-  }
+  ]
 }
 
 
