@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { ImagePlus, X, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import imageCompression from "browser-image-compression";
 import {
   Collapsible,
   CollapsibleContent,
@@ -34,6 +35,7 @@ const PostItem = () => {
   const [availableItems, setAvailableItems] = useState([]);
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isCompressing, setIsCompressing] = useState(false);
 
   const handleImageChange = async (e) => {
     const file = e.target.files?.[0];
@@ -45,19 +47,54 @@ const PostItem = () => {
       return;
     }
 
-    // Validate file size (max 5MB)
+    // Validate file size (max 5MB as fallback)
     if (file.size > 5 * 1024 * 1024) {
       toast.error("Image must be less than 5MB");
       return;
     }
 
-    // Create preview
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setImagePreview(event.target.result);
-      setFormData((prev) => ({ ...prev, image: event.target.result }));
-    };
-    reader.readAsDataURL(file);
+    setIsCompressing(true);
+    try {
+      // Compression options
+      const options = {
+        maxSizeMB: 0.5,        // Target 500KB max
+        maxWidthOrHeight: 1920, // Max dimension
+        useWebWorker: true,     // Better performance
+        fileType: 'image/jpeg', // Convert to JPEG for smaller size
+        initialQuality: 0.82    // 82% quality - good balance
+      };
+
+      // Compress the image
+      const compressedFile = await imageCompression(file, options);
+      
+      // Create preview from compressed file
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setImagePreview(event.target.result);
+        setFormData((prev) => ({ ...prev, image: event.target.result }));
+        setIsCompressing(false);
+        
+        // Show compression info if significant reduction
+        const originalSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+        const compressedSizeMB = (compressedFile.size / (1024 * 1024)).toFixed(2);
+        if (file.size > compressedFile.size * 1.5) {
+          toast.success(`Image compressed: ${originalSizeMB}MB → ${compressedSizeMB}MB`);
+        }
+      };
+      reader.readAsDataURL(compressedFile);
+    } catch (error) {
+      console.error("Image compression error:", error);
+      setIsCompressing(false);
+      
+      // Fallback to original file if compression fails
+      toast.error("Compression failed, using original image");
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setImagePreview(event.target.result);
+        setFormData((prev) => ({ ...prev, image: event.target.result }));
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleRemoveImage = () => {
@@ -171,7 +208,12 @@ const PostItem = () => {
                   : "border-slate-200 hover:border-indigo-300"
               }`}
             >
-              {imagePreview ? (
+              {isCompressing ? (
+                <div className="flex flex-col items-center justify-center aspect-video bg-slate-50 rounded-2xl">
+                  <Loader2 className="w-12 h-12 text-indigo-600 spinner mb-2" />
+                  <span className="text-slate-500 font-medium">Compressing image...</span>
+                </div>
+              ) : imagePreview ? (
                 <div className="upload-preview aspect-video">
                   <img
                     src={imagePreview}
@@ -199,8 +241,12 @@ const PostItem = () => {
                   data-testid="image-upload-label"
                 >
                   <ImagePlus className="w-12 h-12 text-slate-400 mb-2" />
-                  <span className="text-slate-500 font-medium">Click to upload image</span>
-                  <span className="text-sm text-slate-400 mt-1">PNG, JPG up to 5MB</span>
+                  <span className="text-slate-500 font-medium">
+                    {isCompressing ? "Compressing image..." : "Click to upload image"}
+                  </span>
+                  <span className="text-sm text-slate-400 mt-1">
+                    {isCompressing ? "Please wait..." : "PNG, JPG up to 5MB (auto-compressed)"}
+                  </span>
                   <input
                     ref={fileInputRef}
                     type="file"
