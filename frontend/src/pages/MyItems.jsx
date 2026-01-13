@@ -9,20 +9,24 @@ import { Loader2, Plus } from "lucide-react";
 
 const MyItems = () => {
   const navigate = useNavigate();
-  const { user, API } = useAuth();
+  const { user, API, getAuthHeaders } = useAuth();
   const [items, setItems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchItems = useCallback(async () => {
     try {
-      const response = await axios.get(`${API}/my-items`, { withCredentials: true });
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API}/my-items`, { 
+        withCredentials: true,
+        headers: headers
+      });
       setItems(response.data);
     } catch (error) {
       console.error("Failed to fetch items:", error);
     } finally {
       setIsLoading(false);
     }
-  }, [API]);
+  }, [API, getAuthHeaders]);
 
   useEffect(() => {
     fetchItems();

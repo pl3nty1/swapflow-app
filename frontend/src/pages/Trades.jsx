@@ -22,14 +22,24 @@ const Trades = () => {
 
   const fetchTrades = useCallback(async () => {
     try {
-      const response = await axios.get(`${API}/trades`, { withCredentials: true });
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Trades.jsx:23',message:'fetchTrades entry',data:{hasGetAuthHeaders:typeof getAuthHeaders==='function',sessionToken:localStorage.getItem('session_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API}/trades`, { 
+        withCredentials: true,
+        headers: headers
+      });
       setTrades(response.data);
     } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Trades.jsx:28',message:'fetchTrades error',data:{status:error.response?.status,detail:error.response?.data?.detail,message:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
       console.error("Failed to fetch trades:", error);
     } finally {
       setIsLoading(false);
     }
-  }, [API]);
+  }, [API, getAuthHeaders]);
 
   useEffect(() => {
     fetchTrades();

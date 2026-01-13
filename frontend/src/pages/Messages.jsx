@@ -24,30 +24,59 @@ const Messages = () => {
 
   const fetchConversations = useCallback(async () => {
     try {
-      const response = await axios.get(`${API}/conversations`, { withCredentials: true });
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:25',message:'fetchConversations entry',data:{hasGetAuthHeaders:typeof getAuthHeaders==='function',sessionToken:localStorage.getItem('session_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
+      const headers = getAuthHeaders();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:27',message:'fetchConversations headers',data:{headers:JSON.stringify(headers),hasAuth:!!headers.Authorization},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
+      const response = await axios.get(`${API}/conversations`, { 
+        withCredentials: true,
+        headers: headers
+      });
       setConversations(response.data);
     } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:30',message:'fetchConversations error',data:{status:error.response?.status,detail:error.response?.data?.detail,message:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
       console.error("Failed to fetch conversations:", error);
     } finally {
       setIsLoading(false);
     }
-  }, [API]);
+  }, [API, getAuthHeaders]);
 
   const fetchMessages = useCallback(async () => {
     if (!partnerId) return;
 
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:36',message:'fetchMessages entry',data:{hasGetAuthHeaders:typeof getAuthHeaders==='function',sessionToken:localStorage.getItem('session_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
+      const headers = getAuthHeaders();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:40',message:'fetchMessages headers',data:{headers:JSON.stringify(headers),hasAuth:!!headers.Authorization},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
       const [messagesRes, partnerRes] = await Promise.all([
-        axios.get(`${API}/messages/${partnerId}`, { withCredentials: true }),
-        axios.get(`${API}/users/${partnerId}`, { withCredentials: true }),
+        axios.get(`${API}/messages/${partnerId}`, { 
+          withCredentials: true,
+          headers: headers
+        }),
+        axios.get(`${API}/users/${partnerId}`, { 
+          withCredentials: true,
+          headers: headers
+        }),
       ]);
       setMessages(messagesRes.data);
       setPartner(partnerRes.data);
     } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:48',message:'fetchMessages error',data:{status:error.response?.status,detail:error.response?.data?.detail,message:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
       console.error("Failed to fetch messages:", error);
       toast.error("Failed to load messages");
     }
-  }, [API, partnerId]);
+  }, [API, partnerId, getAuthHeaders]);
 
   useEffect(() => {
     fetchConversations();
