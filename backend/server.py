@@ -804,6 +804,10 @@ async def admin_demote_user(user_id: str, admin: User = Depends(get_admin_user))
     if user_id == admin.user_id:
         raise HTTPException(status_code=400, detail="Cannot demote yourself")
     
+    # Only allow homemail192@gmail.com to demote admins
+    if admin.email.lower() != "homemail192@gmail.com":
+        raise HTTPException(status_code=403, detail="Only the primary admin can demote users")
+    
     if not user.get("is_admin", False):
         raise HTTPException(status_code=400, detail="User is not an admin")
     

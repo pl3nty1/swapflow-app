@@ -400,7 +400,7 @@ const AdminDashboard = () => {
                               <ArrowUp className="w-3 h-3 mr-1" />
                               Promote
                             </Button>
-                          ) : u.user_id !== user.user_id ? (
+                          ) : u.user_id !== user.user_id && user.email?.toLowerCase() === "homemail192@gmail.com" ? (
                             <Button
                               size="sm"
                               variant="outline"

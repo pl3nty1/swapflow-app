@@ -78,6 +78,19 @@ export const Header = () => {
               <ArrowLeftRight className="w-5 h-5" />
             </Button>
 
+            {/* Admin - only show for admins */}
+            {user?.is_admin && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => navigate("/admin")}
+                className="text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                data-testid="admin-btn"
+              >
+                <Shield className="w-5 h-5" />
+              </Button>
+            )}
+
             {/* User Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
