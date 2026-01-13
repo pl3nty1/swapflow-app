@@ -58,8 +58,13 @@ const ItemDetail = () => {
 
     setIsSending(true);
     try {
-      const { getAuthHeaders } = useAuth();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:61',message:'handleSendMessage entry',data:{hasGetAuthHeaders:typeof getAuthHeaders==='function',sessionToken:localStorage.getItem('session_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       const headers = getAuthHeaders();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:63',message:'headers generated',data:{headers:JSON.stringify(headers),hasAuth:!!headers.Authorization},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
 
       await axios.post(
         `${API}/messages`,
@@ -78,6 +83,9 @@ const ItemDetail = () => {
       setIsMessageOpen(false);
       navigate(`/messages/${owner.user_id}`);
     } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:81',message:'send message error',data:{status:error.response?.status,detail:error.response?.data?.detail,message:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
       toast.error("Failed to send message");
     } finally {
       setIsSending(false);
@@ -87,7 +95,13 @@ const ItemDetail = () => {
   const handleStartTrade = async () => {
     setIsCreatingTrade(true);
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:87',message:'handleStartTrade entry',data:{hasGetAuthHeaders:typeof getAuthHeaders==='function',sessionToken:localStorage.getItem('session_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       const headers = getAuthHeaders();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:90',message:'headers generated for trade',data:{headers:JSON.stringify(headers),hasAuth:!!headers.Authorization},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
 
       await axios.post(
         `${API}/trades`,
@@ -104,6 +118,9 @@ const ItemDetail = () => {
       setIsTradeOpen(false);
       navigate("/trades");
     } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:107',message:'start trade error',data:{status:error.response?.status,detail:error.response?.data?.detail,message:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
       toast.error(error.response?.data?.detail || "Failed to start trade");
     } finally {
       setIsCreatingTrade(false);

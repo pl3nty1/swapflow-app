@@ -78,7 +78,6 @@ const PostItem = () => {
 
     setIsLoading(true);
     try {
-      const { getAuthHeaders } = useAuth();
       const headers = getAuthHeaders();
 
       await axios.post(

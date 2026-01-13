@@ -38,8 +38,13 @@ const Trades = () => {
   const handleConfirm = async (tradeId) => {
     setConfirmingId(tradeId);
     try {
-      const { getAuthHeaders } = useAuth();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Trades.jsx:38',message:'handleConfirm entry',data:{hasGetAuthHeaders:typeof getAuthHeaders==='function',sessionToken:localStorage.getItem('session_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       const headers = getAuthHeaders();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Trades.jsx:42',message:'headers generated',data:{headers:JSON.stringify(headers),hasAuth:!!headers.Authorization},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
 
       await axios.post(`${API}/trades/${tradeId}/confirm`, {}, { 
         withCredentials: true,
@@ -48,6 +53,9 @@ const Trades = () => {
       toast.success("Trade confirmed!");
       fetchTrades();
     } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Trades.jsx:51',message:'confirm trade error',data:{status:error.response?.status,detail:error.response?.data?.detail,message:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
       toast.error(error.response?.data?.detail || "Failed to confirm trade");
     } finally {
       setConfirmingId(null);

@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ArrowLeftRight, Plus, MessageCircle, User, LogOut, Package } from "lucide-react";
+import { ArrowLeftRight, Plus, MessageCircle, User, LogOut, Package, Shield } from "lucide-react";
 
 export const Header = () => {
   const { user, logout } = useAuth();
@@ -133,6 +133,19 @@ export const Header = () => {
                   <ArrowLeftRight className="w-4 h-4 mr-2" />
                   My Trades
                 </DropdownMenuItem>
+                {user?.is_admin && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => navigate("/admin")}
+                      className="cursor-pointer text-indigo-600 focus:text-indigo-600"
+                      data-testid="admin-menu-item"
+                    >
+                      <Shield className="w-4 h-4 mr-2" />
+                      Admin Dashboard
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleLogout}

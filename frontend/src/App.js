@@ -13,6 +13,7 @@ import Messages from "@/pages/Messages";
 import PostItem from "@/pages/PostItem";
 import MyItems from "@/pages/MyItems";
 import Trades from "@/pages/Trades";
+import AdminDashboard from "@/pages/AdminDashboard";
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://swapflow-app-uj7o.vercel.app').replace(/\/+$/, ''); // Remove trailing slashes
 const API = `${BACKEND_URL}/api`;
@@ -92,6 +93,73 @@ const ProtectedRoute = ({ children }) => {
   return user ? children : null;
 };
 
+// Admin Protected Route Component
+const AdminProtectedRoute = ({ children }) => {
+  const navigate = useNavigate();
+  const { user, setUser, isLoading, setIsLoading } = useAuth();
+
+  useEffect(() => {
+    // If we already have user, check admin status
+    if (user) {
+      if (!user.is_admin) {
+        navigate("/dashboard", { replace: true });
+      }
+      setIsLoading(false);
+      return;
+    }
+
+    const checkAuth = async () => {
+      if (!API) {
+        console.error('API URL not configured');
+        setIsLoading(false);
+        navigate("/", { replace: true });
+        return;
+      }
+
+      try {
+        // Get session token from localStorage as fallback
+        const sessionToken = localStorage.getItem('session_token');
+        const headers = {};
+        if (sessionToken) {
+          headers['Authorization'] = `Bearer ${sessionToken}`;
+        }
+
+        const response = await axios.get(`${API}/auth/me`, { 
+          withCredentials: true,
+          headers: headers,
+          timeout: 10000 // 10 second timeout
+        });
+
+        if (response.data) {
+          setUser(response.data);
+          if (!response.data.is_admin) {
+            navigate("/dashboard", { replace: true });
+          }
+        } else {
+          navigate("/", { replace: true });
+        }
+      } catch (error) {
+        console.error('Auth check failed:', error);
+        navigate("/", { replace: true });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkAuth();
+  }, [navigate, setUser, user, setIsLoading, API]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full spinner"></div>
+      </div>
+    );
+  }
+
+  return user && user.is_admin ? children : null;
+};
+
 // App Router
 function AppRouter() {
   return (
@@ -159,6 +227,14 @@ function AppRouter() {
           <ProtectedRoute>
             <Trades />
           </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <AdminProtectedRoute>
+            <AdminDashboard />
+          </AdminProtectedRoute>
         }
       />
     </Routes>

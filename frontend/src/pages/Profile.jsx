@@ -65,7 +65,6 @@ const Profile = () => {
 
     setIsSaving(true);
     try {
-      const { getAuthHeaders } = useAuth();
       const headers = getAuthHeaders();
 
       const response = await axios.put(

@@ -86,6 +86,7 @@ class User(BaseModel):
     trade_points: int = 0
     rating: Optional[float] = None
     rating_count: int = 0
+    is_admin: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class UserUpdate(BaseModel):
@@ -149,6 +150,12 @@ class RatingCreate(BaseModel):
 
 async def get_current_user(request: Request) -> User:
     """Get current user from session token in cookie or Authorization header"""
+    # #region agent log
+    import json
+    log_data = {"location": "server.py:151", "message": "get_current_user entry", "data": {"hasCookie": "session_token" in request.cookies, "hasAuthHeader": "authorization" in [k.lower() for k in request.headers.keys()], "authHeader": request.headers.get("Authorization", "none")[:50] if request.headers.get("Authorization") else "none"}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "D"}
+    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+        f.write(json.dumps(log_data) + "\n")
+    # #endregion
     session_token = request.cookies.get("session_token")
     
     if not session_token:
@@ -156,10 +163,20 @@ async def get_current_user(request: Request) -> User:
         if auth_header and auth_header.startswith("Bearer "):
             session_token = auth_header[7:]
     
+    # #region agent log
+    log_data = {"location": "server.py:160", "message": "session token extracted", "data": {"hasSessionToken": bool(session_token), "tokenLength": len(session_token) if session_token else 0}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "D"}
+    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+        f.write(json.dumps(log_data) + "\n")
+    # #endregion
     if not session_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     session = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
+    # #region agent log
+    log_data = {"location": "server.py:163", "message": "session lookup", "data": {"sessionFound": bool(session)}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "E"}
+    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+        f.write(json.dumps(log_data) + "\n")
+    # #endregion
     if not session:
         raise HTTPException(status_code=401, detail="Invalid session")
     
@@ -168,6 +185,11 @@ async def get_current_user(request: Request) -> User:
         expires_at = datetime.fromisoformat(expires_at)
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
+    # #region agent log
+    log_data = {"location": "server.py:172", "message": "session expiry check", "data": {"expiresAt": str(expires_at), "isExpired": expires_at < datetime.now(timezone.utc)}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000), "sessionId": "debug-session", "runId": "run1", "hypothesisId": "E"}
+    with open("/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log", "a") as f:
+        f.write(json.dumps(log_data) + "\n")
+    # #endregion
     if expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Session expired")
     
@@ -183,6 +205,13 @@ async def get_optional_user(request: Request) -> Optional[User]:
         return await get_current_user(request)
     except HTTPException:
         return None
+
+async def get_admin_user(request: Request) -> User:
+    """Get current user and verify they are an admin"""
+    user = await get_current_user(request)
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
 
 # ============== AUTH ENDPOINTS ==============
 
@@ -223,16 +252,32 @@ async def google_auth(request: Request, response: Response):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
+    # Check for admin email auto-promotion
+    admin_email = "homemail192@gmail.com"
+    admin_email_domain = os.environ.get('ADMIN_EMAIL_DOMAIN', '').strip()
+    is_admin = False
+    # Check specific email first
+    if email.lower() == admin_email.lower():
+        is_admin = True
+    # Also check domain if configured
+    elif admin_email_domain and email.endswith(f'@{admin_email_domain}'):
+        is_admin = True
+    
     if existing_user:
         user_id = existing_user["user_id"]
-        # Update user info if needed
+        # Update user info if needed, and check if admin status should be updated
+        update_data = {
+            "name": name,
+            "picture": picture
+        }
+        # If email domain matches and user isn't already admin, promote them
+        if is_admin and not existing_user.get("is_admin", False):
+            update_data["is_admin"] = True
+        
         try:
             await db.users.update_one(
                 {"user_id": user_id},
-                {"$set": {
-                    "name": name,
-                    "picture": picture
-                }}
+                {"$set": update_data}
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
@@ -248,6 +293,7 @@ async def google_auth(request: Request, response: Response):
             "trade_points": 0,
             "rating": None,
             "rating_count": 0,
+            "is_admin": is_admin,
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         try:
@@ -699,6 +745,149 @@ async def upload_image(file: UploadFile = File(...), user: User = Depends(get_cu
     data_url = f"data:{file.content_type};base64,{base64_data}"
     
     return {"image_url": data_url}
+
+# ============== ADMIN ENDPOINTS ==============
+
+@api_router.get("/admin/users")
+async def admin_get_users(admin: User = Depends(get_admin_user)):
+    """Get all users (admin only)"""
+    users = await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    # Ensure is_admin field is present for backward compatibility
+    for user in users:
+        if "is_admin" not in user:
+            user["is_admin"] = False
+    return users
+
+@api_router.get("/admin/stats")
+async def admin_get_stats(admin: User = Depends(get_admin_user)):
+    """Get platform statistics (admin only)"""
+    stats = {
+        "total_users": await db.users.count_documents({}),
+        "total_items": await db.items.count_documents({}),
+        "available_items": await db.items.count_documents({"is_available": True}),
+        "total_trades": await db.trades.count_documents({}),
+        "active_trades": await db.trades.count_documents({"is_completed": False}),
+        "completed_trades": await db.trades.count_documents({"is_completed": True}),
+        "total_messages": await db.messages.count_documents({}),
+        "total_categories": await db.categories.count_documents({}),
+        "total_admins": await db.users.count_documents({"is_admin": True})
+    }
+    return stats
+
+@api_router.get("/admin/items")
+async def admin_get_items(admin: User = Depends(get_admin_user)):
+    """Get all items including unavailable ones (admin only)"""
+    items = await db.items.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return items
+
+@api_router.delete("/admin/items/{item_id}")
+async def admin_delete_item(item_id: str, admin: User = Depends(get_admin_user)):
+    """Delete any item (admin override)"""
+    item = await db.items.find_one({"item_id": item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    await db.items.delete_one({"item_id": item_id})
+    return {"message": "Item deleted by admin"}
+
+@api_router.post("/admin/users/{user_id}/promote")
+async def admin_promote_user(user_id: str, admin: User = Depends(get_admin_user)):
+    """Promote user to admin"""
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.get("is_admin", False):
+        raise HTTPException(status_code=400, detail="User is already an admin")
+    
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"is_admin": True}}
+    )
+    
+    updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return {"message": "User promoted to admin", "user": updated_user}
+
+@api_router.post("/admin/users/{user_id}/demote")
+async def admin_demote_user(user_id: str, admin: User = Depends(get_admin_user)):
+    """Remove admin status from user"""
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user_id == admin.user_id:
+        raise HTTPException(status_code=400, detail="Cannot demote yourself")
+    
+    if not user.get("is_admin", False):
+        raise HTTPException(status_code=400, detail="User is not an admin")
+    
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"is_admin": False}}
+    )
+    
+    updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return {"message": "User demoted from admin", "user": updated_user}
+
+@api_router.delete("/admin/users/{user_id}")
+async def admin_delete_user(user_id: str, admin: User = Depends(get_admin_user)):
+    """Delete user account (admin only)"""
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user_id == admin.user_id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    
+    # Delete user and related data
+    await db.users.delete_one({"user_id": user_id})
+    await db.user_sessions.delete_many({"user_id": user_id})
+    await db.items.delete_many({"user_id": user_id})
+    await db.messages.delete_many({"$or": [{"sender_id": user_id}, {"receiver_id": user_id}]})
+    # Note: Trades are kept for historical record, but could be deleted if needed
+    
+    return {"message": "User deleted"}
+
+@api_router.get("/admin/trades")
+async def admin_get_trades(admin: User = Depends(get_admin_user)):
+    """Get all trades (admin only)"""
+    trades = await db.trades.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    # Enrich with item and user data
+    result = []
+    for trade in trades:
+        item = await db.items.find_one({"item_id": trade["item_id"]}, {"_id": 0})
+        owner = await db.users.find_one({"user_id": trade["owner_id"]}, {"_id": 0})
+        trader = await db.users.find_one({"user_id": trade["trader_id"]}, {"_id": 0})
+        result.append({
+            "trade": trade,
+            "item": item,
+            "owner": owner,
+            "trader": trader
+        })
+    
+    return result
+
+@api_router.get("/admin/messages")
+async def admin_get_messages(admin: User = Depends(get_admin_user), skip: int = 0, limit: int = 100):
+    """Get all messages with pagination (admin only)"""
+    messages = await db.messages.find({}, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Get total count
+    total = await db.messages.count_documents({})
+    
+    # Enrich with user data
+    result = []
+    for msg in messages:
+        sender = await db.users.find_one({"user_id": msg["sender_id"]}, {"_id": 0})
+        receiver = await db.users.find_one({"user_id": msg["receiver_id"]}, {"_id": 0})
+        result.append({
+            "message": msg,
+            "sender": sender,
+            "receiver": receiver
+        })
+    
+    return {"messages": result, "total": total, "skip": skip, "limit": limit}
 
 # ============== ROOT ==============
 
