@@ -147,7 +147,6 @@ const Trades = () => {
 
   const activeTrades = trades.filter((t) => !t.trade.is_completed && !t.trade.is_cancelled);
   const completedTrades = trades.filter((t) => t.trade.is_completed);
-  const cancelledTrades = trades.filter((t) => t.trade.is_cancelled);
 
   const TradeCard = ({ tradeData }) => {
     const { trade, item, trader_item, owner, trader } = tradeData;
@@ -358,11 +357,6 @@ const Trades = () => {
               <TabsTrigger value="completed" data-testid="completed-tab">
                 Completed ({completedTrades.length})
               </TabsTrigger>
-              {cancelledTrades.length > 0 && (
-                <TabsTrigger value="cancelled" data-testid="cancelled-tab">
-                  Cancelled ({cancelledTrades.length})
-                </TabsTrigger>
-              )}
             </TabsList>
 
             <TabsContent value="active" className="space-y-4">
@@ -384,12 +378,6 @@ const Trades = () => {
                 completedTrades.map((t) => <TradeCard key={t.trade.trade_id} tradeData={t} />)
               )}
             </TabsContent>
-
-            {cancelledTrades.length > 0 && (
-              <TabsContent value="cancelled" className="space-y-4">
-                {cancelledTrades.map((t) => <TradeCard key={t.trade.trade_id} tradeData={t} />)}
-              </TabsContent>
-            )}
           </Tabs>
         )}
       </main>
