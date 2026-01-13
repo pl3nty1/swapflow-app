@@ -315,6 +315,8 @@ async def google_auth(request: Request, response: Response):
         pass
     # #endregion
 
+    # Set cookie - for cross-origin, we need samesite="none" and secure=True
+    # Don't set domain to allow browser to handle it automatically
     response.set_cookie(
         key="session_token",
         value=session_token,
@@ -322,8 +324,8 @@ async def google_auth(request: Request, response: Response):
         secure=True,
         samesite="none",
         path="/",
-        max_age=7*24*60*60,
-        domain=None  # Let browser set domain automatically
+        max_age=7*24*60*60
+        # Explicitly NOT setting domain - let browser handle it
     )
     
     # Get user data

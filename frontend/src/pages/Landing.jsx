@@ -102,6 +102,10 @@ const Landing = () => {
   }, [navigate]);
 
   const handleGoogleSignIn = async (response) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:104',message:'handleGoogleSignIn called',data:{hasCredential:!!response?.credential,credentialLength:response?.credential?.length,API,API_type:typeof API},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
+    // #endregion
+
     if (!API) {
       console.error('API URL not configured');
       alert('Backend URL not configured. Please check environment variables.');
@@ -109,6 +113,10 @@ const Landing = () => {
     }
 
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:112',message:'Sending auth request',data:{url:`${API}/auth/google`,hasCredential:!!response?.credential},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
+      // #endregion
+
       // Send the credential to backend
       const authResponse = await axios.post(
         `${API}/auth/google`,
@@ -119,7 +127,14 @@ const Landing = () => {
         }
       );
 
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:122',message:'Auth response received',data:{status:authResponse.status,hasUser:!!authResponse.data?.user,userId:authResponse.data?.user?.user_id,hasSessionToken:!!authResponse.data?.session_token,cookies:document.cookie},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
+      // #endregion
+
       if (authResponse.data && authResponse.data.user) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:124',message:'Navigating to dashboard',data:{userId:authResponse.data.user.user_id},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
+        // #endregion
         // Small delay to ensure cookie is set
         setTimeout(() => {
           navigate("/dashboard", { replace: true });
@@ -129,12 +144,32 @@ const Landing = () => {
         alert('Authentication failed. Please try again.');
       }
     } catch (error) {
+      // #region agent log
+      const errorData = {
+        errorMessage: error.message,
+        errorType: error.name,
+        errorCode: error.code,
+        hasResponse: !!error.response,
+        statusCode: error.response?.status,
+        statusText: error.response?.statusText,
+        responseData: error.response?.data,
+        isTimeout: error.code === 'ECONNABORTED',
+        requestURL: `${API}/auth/google`,
+        requestMethod: 'POST'
+      };
+      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Landing.jsx:131',message:'Auth error caught',data:errorData,"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H1"})}).catch(()=>{});
+      console.error("Auth error details:", errorData);
+      // #endregion
       console.error("Auth error:", error);
       if (error.response) {
         console.error("Error response:", error.response.data);
         alert(`Authentication failed: ${error.response.data?.detail || error.message}`);
+      } else if (error.code === 'ECONNABORTED') {
+        alert('Request timed out. The server may be slow or unreachable.');
+      } else if (error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
+        alert('Network error: Cannot reach the server. Please check your connection and try again.');
       } else {
-        alert('Network error. Please check your connection and try again.');
+        alert(`Network error: ${error.message}. Please check your connection and try again.`);
       }
     }
   };
