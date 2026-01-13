@@ -11,12 +11,13 @@ from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
 import base64
+import json
+import time
 
 # #region agent log
-import json
 try:
     with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({"location":"server.py:14","message":"Attempting to import google.auth.transport.requests","data":{"hypothesis":"H1"},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+        f.write(json.dumps({"location":"server.py:17","message":"Attempting to import google.auth.transport.requests","data":{"hypothesis":"H1"},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
 except:
     pass
 # #endregion
@@ -26,7 +27,7 @@ try:
     # #region agent log
     try:
         with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:16","message":"Successfully imported google.auth.transport.requests","data":{"hypothesis":"H1"},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+            f.write(json.dumps({"location":"server.py:19","message":"Successfully imported google.auth.transport.requests","data":{"hypothesis":"H1"},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
     except:
         pass
     # #endregion
@@ -34,7 +35,7 @@ except ImportError as e:
     # #region agent log
     try:
         with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:16","message":"Failed to import google.auth.transport.requests","data":{"error":str(e),"errorType":type(e).__name__,"hypothesis":"H1"},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+            f.write(json.dumps({"location":"server.py:19","message":"Failed to import google.auth.transport.requests","data":{"error":str(e),"errorType":type(e).__name__,"hypothesis":"H1"},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
     except:
         pass
     # #endregion
