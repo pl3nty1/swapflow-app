@@ -65,10 +65,16 @@ const Profile = () => {
 
     setIsSaving(true);
     try {
+      const { getAuthHeaders } = useAuth();
+      const headers = getAuthHeaders();
+
       const response = await axios.put(
         `${API}/users/profile`,
         { username: editUsername.trim() },
-        { withCredentials: true }
+        { 
+          withCredentials: true,
+          headers: headers
+        }
       );
       setProfileUser(response.data);
       setUser(response.data);

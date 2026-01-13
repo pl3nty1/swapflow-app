@@ -70,13 +70,19 @@ const Messages = () => {
 
     setIsSending(true);
     try {
+      const { getAuthHeaders } = useAuth();
+      const headers = getAuthHeaders();
+
       const response = await axios.post(
         `${API}/messages`,
         {
           receiver_id: partnerId,
           content: newMessage.trim(),
         },
-        { withCredentials: true }
+        { 
+          withCredentials: true,
+          headers: headers
+        }
       );
       setMessages((prev) => [...prev, response.data]);
       setNewMessage("");

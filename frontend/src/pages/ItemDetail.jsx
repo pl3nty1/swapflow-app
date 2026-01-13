@@ -22,7 +22,7 @@ import { ArrowLeftRight, MessageCircle, Loader2, ArrowLeft, Trash2 } from "lucid
 const ItemDetail = () => {
   const { itemId } = useParams();
   const navigate = useNavigate();
-  const { user, API } = useAuth();
+  const { user, API, getAuthHeaders } = useAuth();
   const [item, setItem] = useState(null);
   const [owner, setOwner] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -58,6 +58,9 @@ const ItemDetail = () => {
 
     setIsSending(true);
     try {
+      const { getAuthHeaders } = useAuth();
+      const headers = getAuthHeaders();
+
       await axios.post(
         `${API}/messages`,
         {
@@ -65,7 +68,10 @@ const ItemDetail = () => {
           item_id: itemId,
           content: message.trim(),
         },
-        { withCredentials: true }
+        { 
+          withCredentials: true,
+          headers: headers
+        }
       );
       toast.success("Message sent!");
       setMessage("");
@@ -81,13 +87,18 @@ const ItemDetail = () => {
   const handleStartTrade = async () => {
     setIsCreatingTrade(true);
     try {
+      const headers = getAuthHeaders();
+
       await axios.post(
         `${API}/trades`,
         {
           item_id: itemId,
           owner_id: owner.user_id,
         },
-        { withCredentials: true }
+        { 
+          withCredentials: true,
+          headers: headers
+        }
       );
       toast.success("Trade initiated! Check your trades page.");
       setIsTradeOpen(false);
@@ -104,7 +115,12 @@ const ItemDetail = () => {
 
     setIsDeleting(true);
     try {
-      await axios.delete(`${API}/items/${itemId}`, { withCredentials: true });
+      const headers = getAuthHeaders();
+
+      await axios.delete(`${API}/items/${itemId}`, { 
+        withCredentials: true,
+        headers: headers
+      });
       toast.success("Item deleted");
       navigate("/my-items");
     } catch (error) {

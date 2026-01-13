@@ -12,7 +12,7 @@ import { ImagePlus, X, Loader2 } from "lucide-react";
 
 const PostItem = () => {
   const navigate = useNavigate();
-  const { API } = useAuth();
+  const { API, getAuthHeaders } = useAuth();
   const fileInputRef = useRef(null);
   const [isLoading, setIsLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
@@ -78,12 +78,8 @@ const PostItem = () => {
 
     setIsLoading(true);
     try {
-      // Get session token from localStorage as fallback
-      const sessionToken = localStorage.getItem('session_token');
-      const headers = {};
-      if (sessionToken) {
-        headers['Authorization'] = `Bearer ${sessionToken}`;
-      }
+      const { getAuthHeaders } = useAuth();
+      const headers = getAuthHeaders();
 
       await axios.post(
         `${API}/items`,

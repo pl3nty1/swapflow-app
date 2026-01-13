@@ -13,7 +13,7 @@ import { Loader2, Check, MessageCircle, Star } from "lucide-react";
 
 const Trades = () => {
   const navigate = useNavigate();
-  const { user, API } = useAuth();
+  const { user, API, getAuthHeaders } = useAuth();
   const [trades, setTrades] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [confirmingId, setConfirmingId] = useState(null);
@@ -38,7 +38,13 @@ const Trades = () => {
   const handleConfirm = async (tradeId) => {
     setConfirmingId(tradeId);
     try {
-      await axios.post(`${API}/trades/${tradeId}/confirm`, {}, { withCredentials: true });
+      const { getAuthHeaders } = useAuth();
+      const headers = getAuthHeaders();
+
+      await axios.post(`${API}/trades/${tradeId}/confirm`, {}, { 
+        withCredentials: true,
+        headers: headers
+      });
       toast.success("Trade confirmed!");
       fetchTrades();
     } catch (error) {
@@ -53,10 +59,15 @@ const Trades = () => {
 
     setIsRating(true);
     try {
+      const headers = getAuthHeaders();
+
       await axios.post(
         `${API}/trades/${ratingModal.trade.trade_id}/rate`,
         { rating },
-        { withCredentials: true }
+        { 
+          withCredentials: true,
+          headers: headers
+        }
       );
       toast.success("Rating submitted!");
       setRatingModal({ isOpen: false, trade: null, otherUser: null });

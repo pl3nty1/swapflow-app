@@ -165,6 +165,16 @@ function AppRouter() {
   );
 }
 
+// Helper function to get auth headers
+const getAuthHeaders = () => {
+  const sessionToken = localStorage.getItem('session_token');
+  const headers = {};
+  if (sessionToken) {
+    headers['Authorization'] = `Bearer ${sessionToken}`;
+  }
+  return headers;
+};
+
 // Auth Provider
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -172,16 +182,21 @@ function AuthProvider({ children }) {
 
   const logout = async () => {
     try {
-      await axios.post(`${API}/auth/logout`, {}, { withCredentials: true });
+      const headers = getAuthHeaders();
+      await axios.post(`${API}/auth/logout`, {}, { 
+        withCredentials: true,
+        headers: headers
+      });
     } catch (error) {
       console.error("Logout error:", error);
     } finally {
       setUser(null);
+      localStorage.removeItem('session_token');
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, isLoading, setIsLoading, logout, API }}>
+    <AuthContext.Provider value={{ user, setUser, isLoading, setIsLoading, logout, API, getAuthHeaders }}>
       {children}
     </AuthContext.Provider>
   );
