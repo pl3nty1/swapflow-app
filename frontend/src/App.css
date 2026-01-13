@@ -1,0 +1,116 @@
+/* SwapFlow Custom Styles */
+
+.item-card {
+    transition: all 0.3s ease-out;
+}
+
+.item-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px -10px rgba(79, 70, 229, 0.15);
+}
+
+/* Star rating */
+.star-rating {
+    display: inline-flex;
+    gap: 2px;
+}
+
+.star-rating .star {
+    transition: transform 0.15s ease;
+}
+
+.star-rating .star:hover {
+    transform: scale(1.2);
+}
+
+/* Message bubble */
+.message-sent {
+    background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%);
+    color: white;
+    border-radius: 18px 18px 4px 18px;
+}
+
+.message-received {
+    background: #F1F5F9;
+    color: #0F172A;
+    border-radius: 18px 18px 18px 4px;
+}
+
+/* Category pill */
+.category-pill {
+    transition: all 0.2s ease;
+}
+
+.category-pill:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.15);
+}
+
+.category-pill.active {
+    background: #4F46E5;
+    color: white;
+}
+
+/* Profile badge */
+.trade-badge {
+    background: linear-gradient(135deg, #0D9488 0%, #14B8A6 100%);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 9999px;
+    font-weight: 600;
+}
+
+/* Loading spinner */
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+}
+
+/* Fade in animation */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-in {
+    animation: fadeIn 0.3s ease-out;
+}
+
+/* Image upload preview */
+.upload-preview {
+    position: relative;
+    overflow: hidden;
+    border-radius: 1rem;
+}
+
+.upload-preview img {
+    object-fit: cover;
+    width: 100%;
+    height: 100%;
+}
+
+.upload-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.upload-preview:hover .upload-overlay {
+    opacity: 1;
+}

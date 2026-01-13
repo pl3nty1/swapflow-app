@@ -1,0 +1,134 @@
+{
+  "project_name": "SwapFlow",
+  "design_philosophy": {
+    "core_vibe": "Curated, Airy, Trustworthy, Tactile",
+    "aesthetic_archetype": "Soft Utility",
+    "key_principles": [
+      "Content is King: The item images are the heroes. UI recedes.",
+      "Masonry Layout: Asymmetric grid for organic discovery.",
+      "Micro-Interactions: Subtle lifts and shadows on hover.",
+      "Whitespace: Generous padding to prevent visual clutter."
+    ]
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Manrope, sans-serif",
+      "body": "Inter, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "scale": {
+      "h1": "text-4xl md:text-5xl font-bold tracking-tight",
+      "h2": "text-3xl font-semibold tracking-tight",
+      "h3": "text-2xl font-medium",
+      "body": "text-base leading-relaxed text-slate-600",
+      "caption": "text-sm text-slate-500"
+    }
+  },
+  "colors": {
+    "palette": {
+      "primary": {
+        "name": "Electric Indigo",
+        "hex": "#4F46E5",
+        "tailwind": "indigo-600",
+        "usage": "Primary CTAs, Active States, Brand Logo"
+      },
+      "secondary": {
+        "name": "Slate Clay",
+        "hex": "#F1F5F9",
+        "tailwind": "slate-100",
+        "usage": "Backgrounds, Secondary Buttons"
+      },
+      "accent": {
+        "name": "Trade Teal",
+        "hex": "#0D9488",
+        "tailwind": "teal-600",
+        "usage": "Success states, Trade Confirmations"
+      },
+      "background": {
+        "light": "#FFFFFF",
+        "off_white": "#FAFAFA"
+      },
+      "text": {
+        "primary": "#0F172A",
+        "secondary": "#64748B"
+      }
+    },
+    "gradients": {
+      "hero_overlay": "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.4) 100%)"
+    }
+  },
+  "layout": {
+    "grid_system": {
+      "marketing": "grid grid-cols-1 md:grid-cols-12 gap-8",
+      "dashboard": "grid grid-cols-1 md:grid-cols-4 gap-6",
+      "pinterest_masonry": "columns-2 md:columns-3 lg:columns-4 gap-4 space-y-4"
+    },
+    "spacing": {
+      "container_padding": "px-4 md:px-8 lg:px-12",
+      "section_gap": "py-16 md:py-24"
+    },
+    "border_radius": {
+      "card": "rounded-2xl",
+      "button": "rounded-full",
+      "input": "rounded-lg"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg hover:shadow-indigo-500/30 transition-all duration-300",
+      "secondary": "bg-slate-100 text-slate-900 hover:bg-slate-200",
+      "ghost": "hover:bg-slate-100 text-slate-600"
+    },
+    "cards": {
+      "item_card": "group relative break-inside-avoid rounded-2xl bg-white overflow-hidden hover:shadow-xl transition-all duration-300 ease-out border border-slate-100",
+      "profile_card": "bg-white rounded-2xl p-6 border border-slate-100 shadow-sm"
+    },
+    "inputs": {
+      "default": "bg-slate-50 border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+    }
+  },
+  "visual_enhancers": {
+    "shadows": {
+      "soft": "0 4px 20px -2px rgba(0, 0, 0, 0.05)",
+      "hover": "0 10px 40px -10px rgba(79, 70, 229, 0.15)"
+    },
+    "glassmorphism": {
+      "header": "bg-white/80 backdrop-blur-md border-b border-slate-200/50"
+    },
+    "animations": {
+      "hover_lift": "hover:-translate-y-1 transition-transform duration-300"
+    }
+  },
+  "assets": {
+    "icons": {
+      "library": "lucide-react",
+      "preferred_icons": ["ArrowLeftRight", "Heart", "MessageCircle", "Search", "User", "Plus", "Star"]
+    },
+    "images": {
+      "hero_placeholders": [
+        "https://images.unsplash.com/photo-1705091688083-d62d5082cc4d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwxfHx2aW50YWdlJTIwY2FtZXJhJTIwcmV0cm8lMjBhZXN0aGV0aWN8ZW58MHx8fHwxNzY4MTA2NDI5fDA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1709352332686-be2581ff8f9b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDN8MHwxfHNlYXJjaHwxfHxwb3R0ZWQlMjBwbGFudCUyMGludGVyaW9yJTIwZGVzaWdufGVufDB8fHx8MTc2ODEwNjQzMXww&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1592885331172-bf57d2281135?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwZnVybml0dXJlJTIwY2hhaXJ8ZW58MHx8fHwxNzY4MTA2NDMyfDA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1686773564048-9cf6a6608f12?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHw0fHx2aW50YWdlJTIwY2FtZXJhJTIwcmV0cm8lMjBhZXN0aGV0aWN8ZW58MHx8fHwxNzY4MTA2NDI5fDA&ixlib=rb-4.1.0&q=85"
+      ],
+      "avatars": [
+        "https://images.unsplash.com/photo-1677901766272-8c9d7b49f07c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwxfHxwb3J0cmFpdCUyMGRpdmVyc2UlMjBwZW9wbGUlMjBzbWlsaW5nfGVufDB8fHx8MTc2ODEwNjQzM3ww&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1758272133833-3a2277d426e4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwzfHxwb3J0cmFpdCUyMGRpdmVyc2UlMjBwZW9wbGUlMjBzbWlsaW5nfGVufDB8fHx8MTc2ODEwNjQzM3ww&ixlib=rb-4.1.0&q=85"
+      ]
+    }
+  },
+  "instructions_to_main_agent": {
+    "general": "You are building 'SwapFlow'. Focus on the 'Pinterest' aesthetic. This means using CSS columns for the grid layout (masonry effect). Keep the UI extremely clean. White backgrounds, soft shadows.",
+    "layout_implementation": "For the item grid, DO NOT use a standard flex grid. Use Tailwind's `columns-2 md:columns-3 lg:columns-4 gap-4` on the container, and `break-inside-avoid mb-4` on the item cards. This creates the masonry look.",
+    "auth": "Implement Google OAuth visually (mocked if backend not ready, but UI must be there).",
+    "trading_flow": "The 'Trade' button should be prominent. When clicked, it should open a chat/negotiation modal.",
+    "profile": "Profile page must show 'Trade Points' prominently. Use a badge or a large number with a label.",
+    "universal_rules": [
+      "Use 'Manrope' for all headings.",
+      "Use 'Inter' for body text.",
+      "Rounded corners should be generous (rounded-2xl for cards).",
+      "No pure black (#000000). Use Slate-900 (#0f172a).",
+      "All interactive elements must have `data-testid`."
+    ]
+  }
+}
