@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Depends, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -11,6 +11,7 @@ from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
 import base64
+import json
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
@@ -33,6 +34,9 @@ api_router = APIRouter(prefix="/api")
 # MongoDB connection - lazy initialization for serverless
 _client = None
 _db = None
+
+# WebSocket connections - in-memory storage
+active_connections: dict[str, WebSocket] = {}
 
 def get_db():
     """Get MongoDB database connection (lazy initialization)"""
@@ -101,6 +105,8 @@ class Item(BaseModel):
     image: str
     category: str
     is_available: bool = True
+    desired_category: Optional[str] = None
+    desired_item_ids: Optional[List[str]] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ItemCreate(BaseModel):
@@ -108,6 +114,8 @@ class ItemCreate(BaseModel):
     description: Optional[str] = None
     image: str
     category: str
+    desired_category: Optional[str] = None
+    desired_item_ids: Optional[List[str]] = None
 
 class Category(BaseModel):
     name: str
@@ -119,6 +127,7 @@ class Message(BaseModel):
     receiver_id: str
     item_id: Optional[str] = None
     content: str
+    read_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class MessageCreate(BaseModel):
@@ -129,11 +138,15 @@ class MessageCreate(BaseModel):
 class Trade(BaseModel):
     trade_id: str = Field(default_factory=lambda: f"trade_{uuid.uuid4().hex[:12]}")
     item_id: str
+    trader_item_id: str
     owner_id: str
     trader_id: str
     owner_confirmed: bool = False
     trader_confirmed: bool = False
     is_completed: bool = False
+    is_cancelled: bool = False
+    cancelled_at: Optional[datetime] = None
+    cancelled_by: Optional[str] = None
     owner_rating: Optional[int] = None
     trader_rating: Optional[int] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -141,6 +154,7 @@ class Trade(BaseModel):
 
 class TradeCreate(BaseModel):
     item_id: str
+    trader_item_id: str
     owner_id: str
 
 class RatingCreate(BaseModel):
@@ -423,11 +437,16 @@ async def create_item(item_data: ItemCreate, user: User = Depends(get_current_us
         title=item_data.title,
         description=item_data.description,
         image=item_data.image,
-        category=category
+        category=category,
+        desired_category=item_data.desired_category,
+        desired_item_ids=item_data.desired_item_ids
     )
     
     item_dict = item.model_dump()
     item_dict["created_at"] = item_dict["created_at"].isoformat()
+    # Ensure desired_item_ids is stored as list or None
+    if item_dict.get("desired_item_ids") is not None and not isinstance(item_dict["desired_item_ids"], list):
+        item_dict["desired_item_ids"] = None
     
     # Create a copy for insertion to avoid _id contamination
     insert_dict = item_dict.copy()
@@ -494,19 +513,51 @@ async def get_conversations(user: User = Depends(get_current_user)):
     
     conversations = await db.messages.aggregate(pipeline).to_list(50)
     
-    # Get user info for each conversation
+    # Get user info and unread count for each conversation
     result = []
     for conv in conversations:
         partner = await db.users.find_one({"user_id": conv["_id"]}, {"_id": 0})
         if partner:
+            # Count unread messages from this partner
+            unread_count = await db.messages.count_documents({
+                "sender_id": conv["_id"],
+                "receiver_id": user.user_id,
+                "read_at": None
+            })
+            
             result.append({
                 "partner": partner,
                 "last_message": conv["last_message"],
                 "last_message_time": conv["last_message_time"],
-                "item_id": conv.get("item_id")
+                "item_id": conv.get("item_id"),
+                "unread_count": unread_count
             })
     
     return result
+
+@api_router.get("/messages/unread-count")
+async def get_unread_count(user: User = Depends(get_current_user)):
+    """Get total unread message count for current user"""
+    count = await db.messages.count_documents({
+        "receiver_id": user.user_id,
+        "read_at": None
+    })
+    return {"unread_count": count}
+
+@api_router.post("/messages/{partner_id}/mark-read")
+async def mark_messages_read(partner_id: str, user: User = Depends(get_current_user)):
+    """Mark all messages from a partner as read"""
+    result = await db.messages.update_many(
+        {
+            "sender_id": partner_id,
+            "receiver_id": user.user_id,
+            "read_at": None
+        },
+        {
+            "$set": {"read_at": datetime.now(timezone.utc).isoformat()}
+        }
+    )
+    return {"message": "Messages marked as read", "updated_count": result.modified_count}
 
 @api_router.get("/messages/{partner_id}")
 async def get_messages(partner_id: str, user: User = Depends(get_current_user)):
@@ -527,7 +578,8 @@ async def send_message(msg: MessageCreate, user: User = Depends(get_current_user
         sender_id=user.user_id,
         receiver_id=msg.receiver_id,
         item_id=msg.item_id,
-        content=msg.content
+        content=msg.content,
+        read_at=None
     )
     
     msg_dict = message.model_dump()
@@ -536,7 +588,66 @@ async def send_message(msg: MessageCreate, user: User = Depends(get_current_user
     # Create a copy for insertion to avoid _id contamination
     insert_dict = msg_dict.copy()
     await db.messages.insert_one(insert_dict)
+    
+    # Broadcast to WebSocket connections
+    broadcast_data = {
+        "type": "new_message",
+        "message": msg_dict
+    }
+    # Send to sender and receiver if they're connected
+    for user_id in [user.user_id, msg.receiver_id]:
+        if user_id in active_connections:
+            try:
+                await active_connections[user_id].send_text(json.dumps(broadcast_data))
+            except Exception:
+                # Remove dead connection
+                active_connections.pop(user_id, None)
+    
     return msg_dict
+
+@api_router.websocket("/ws/messages")
+async def websocket_messages(websocket: WebSocket):
+    """WebSocket endpoint for real-time message delivery"""
+    await websocket.accept()
+    user_id = None
+    
+    try:
+        # Get user from query params or headers
+        # For simplicity, we'll use a token-based approach
+        # In production, you'd validate the token properly
+        token = websocket.query_params.get("token") or websocket.headers.get("authorization", "").replace("Bearer ", "")
+        
+        if not token:
+            await websocket.close(code=1008, reason="Authentication required")
+            return
+        
+        # Get user from session token
+        session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+        if not session:
+            await websocket.close(code=1008, reason="Invalid session")
+            return
+        
+        user_id = session["user_id"]
+        active_connections[user_id] = websocket
+        
+        # Send connection confirmation
+        await websocket.send_text(json.dumps({"type": "connected", "user_id": user_id}))
+        
+        # Keep connection alive and handle incoming messages
+        while True:
+            data = await websocket.receive_text()
+            # Handle ping/pong or other messages if needed
+            if data == "ping":
+                await websocket.send_text("pong")
+            
+    except WebSocketDisconnect:
+        if user_id:
+            active_connections.pop(user_id, None)
+    except Exception as e:
+        logger.error(f"WebSocket error: {str(e)}")
+        if user_id:
+            active_connections.pop(user_id, None)
+        await websocket.close()
 
 # ============== TRADE ENDPOINTS ==============
 
@@ -552,11 +663,21 @@ async def create_trade(trade_data: TradeCreate, user: User = Depends(get_current
     if item["user_id"] == user.user_id:
         raise HTTPException(status_code=400, detail="Cannot trade with yourself")
     
+    # Validate trader's item exists and belongs to trader
+    trader_item = await db.items.find_one({"item_id": trade_data.trader_item_id, "is_available": True}, {"_id": 0})
+    if not trader_item:
+        raise HTTPException(status_code=404, detail="Your item not found or not available")
+    
+    if trader_item["user_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="You can only trade with your own items")
+    
     # Check if trade already exists
     existing_trade = await db.trades.find_one({
         "item_id": trade_data.item_id,
+        "trader_item_id": trade_data.trader_item_id,
         "trader_id": user.user_id,
-        "is_completed": False
+        "is_completed": False,
+        "is_cancelled": False
     }, {"_id": 0})
     
     if existing_trade:
@@ -564,6 +685,7 @@ async def create_trade(trade_data: TradeCreate, user: User = Depends(get_current
     
     trade = Trade(
         item_id=trade_data.item_id,
+        trader_item_id=trade_data.trader_item_id,
         owner_id=item["user_id"],
         trader_id=user.user_id
     )
@@ -587,11 +709,13 @@ async def get_my_trades(user: User = Depends(get_current_user)):
     result = []
     for trade in trades:
         item = await db.items.find_one({"item_id": trade["item_id"]}, {"_id": 0})
+        trader_item = await db.items.find_one({"item_id": trade.get("trader_item_id")}, {"_id": 0}) if trade.get("trader_item_id") else None
         owner = await db.users.find_one({"user_id": trade["owner_id"]}, {"_id": 0})
         trader = await db.users.find_one({"user_id": trade["trader_id"]}, {"_id": 0})
         result.append({
             "trade": trade,
             "item": item,
+            "trader_item": trader_item,
             "owner": owner,
             "trader": trader
         })
@@ -610,10 +734,41 @@ async def get_trade(trade_id: str, user: User = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Not authorized")
     
     item = await db.items.find_one({"item_id": trade["item_id"]}, {"_id": 0})
+    trader_item = await db.items.find_one({"item_id": trade.get("trader_item_id")}, {"_id": 0}) if trade.get("trader_item_id") else None
     owner = await db.users.find_one({"user_id": trade["owner_id"]}, {"_id": 0})
     trader = await db.users.find_one({"user_id": trade["trader_id"]}, {"_id": 0})
     
-    return {"trade": trade, "item": item, "owner": owner, "trader": trader}
+    return {"trade": trade, "item": item, "trader_item": trader_item, "owner": owner, "trader": trader}
+
+@api_router.delete("/trades/{trade_id}")
+async def cancel_trade(trade_id: str, user: User = Depends(get_current_user)):
+    """Cancel a trade"""
+    trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    # Only participants can cancel
+    if trade["owner_id"] != user.user_id and trade["trader_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    if trade["is_completed"]:
+        raise HTTPException(status_code=400, detail="Cannot cancel completed trade")
+    
+    if trade.get("is_cancelled", False):
+        raise HTTPException(status_code=400, detail="Trade already cancelled")
+    
+    # Mark trade as cancelled
+    await db.trades.update_one(
+        {"trade_id": trade_id},
+        {"$set": {
+            "is_cancelled": True,
+            "cancelled_at": datetime.now(timezone.utc).isoformat(),
+            "cancelled_by": user.user_id
+        }}
+    )
+    
+    updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    return {"message": "Trade cancelled", "trade": updated_trade}
 
 @api_router.post("/trades/{trade_id}/confirm")
 async def confirm_trade(trade_id: str, user: User = Depends(get_current_user)):
@@ -624,6 +779,9 @@ async def confirm_trade(trade_id: str, user: User = Depends(get_current_user)):
     
     if trade["is_completed"]:
         raise HTTPException(status_code=400, detail="Trade already completed")
+    
+    if trade.get("is_cancelled", False):
+        raise HTTPException(status_code=400, detail="Cannot confirm cancelled trade")
     
     # Determine which party is confirming
     update_field = None
@@ -773,8 +931,16 @@ async def admin_delete_item(item_id: str, admin: User = Depends(get_admin_user))
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     
+    # Delete all active trades involving this item
+    deleted_trades = await db.trades.delete_many({
+        "$or": [
+            {"item_id": item_id, "is_completed": False, "is_cancelled": False},
+            {"trader_item_id": item_id, "is_completed": False, "is_cancelled": False}
+        ]
+    })
+    
     await db.items.delete_one({"item_id": item_id})
-    return {"message": "Item deleted by admin"}
+    return {"message": "Item deleted by admin", "trades_deleted": deleted_trades.deleted_count}
 
 @api_router.post("/admin/users/{user_id}/promote")
 async def admin_promote_user(user_id: str, admin: User = Depends(get_admin_user)):

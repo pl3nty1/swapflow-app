@@ -7,8 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { ImagePlus, X, Loader2 } from "lucide-react";
+import { ImagePlus, X, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 const PostItem = () => {
   const navigate = useNavigate();
@@ -21,7 +27,13 @@ const PostItem = () => {
     description: "",
     category: "",
     image: "",
+    desired_category: "",
+    desired_item_ids: [],
   });
+  const [showPreferences, setShowPreferences] = useState(false);
+  const [availableItems, setAvailableItems] = useState([]);
+  const [isLoadingItems, setIsLoadingItems] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const handleImageChange = async (e) => {
     const file = e.target.files?.[0];
@@ -56,6 +68,37 @@ const PostItem = () => {
     }
   };
 
+  const fetchAvailableItems = async () => {
+    setIsLoadingItems(true);
+    try {
+      const response = await axios.get(`${API}/items`, { withCredentials: true });
+      setAvailableItems(response.data.items || []);
+    } catch (error) {
+      console.error("Failed to fetch items:", error);
+    } finally {
+      setIsLoadingItems(false);
+    }
+  };
+
+  const handleToggleItem = (itemId) => {
+    setFormData((prev) => {
+      const currentIds = prev.desired_item_ids || [];
+      if (currentIds.includes(itemId)) {
+        return { ...prev, desired_item_ids: currentIds.filter((id) => id !== itemId) };
+      } else {
+        return { ...prev, desired_item_ids: [...currentIds, itemId] };
+      }
+    });
+  };
+
+  const filteredItems = availableItems.filter(
+    (item) =>
+      item.item_id !== formData.title && // Exclude current item if it exists
+      (searchQuery === "" ||
+        item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.category.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -87,6 +130,8 @@ const PostItem = () => {
           description: formData.description.trim() || null,
           category: formData.category.trim().toLowerCase(),
           image: formData.image,
+          desired_category: formData.desired_category.trim() || null,
+          desired_item_ids: formData.desired_item_ids.length > 0 ? formData.desired_item_ids : null,
         },
         { 
           withCredentials: true,
@@ -214,6 +259,120 @@ const PostItem = () => {
               Single word only (e.g., "electronics" not "electronic items")
             </p>
           </div>
+
+          {/* Trade Preferences (Optional) */}
+          <Collapsible open={showPreferences} onOpenChange={setShowPreferences}>
+            <CollapsibleTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-between rounded-full"
+              >
+                <span>Trade Preferences (Optional)</span>
+                {showPreferences ? (
+                  <ChevronUp className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
+                )}
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-4 pt-4">
+              <p className="text-sm text-slate-600">
+                These preferences are informational only and won't restrict trades. Users can still
+                trade for your item regardless of these preferences.
+              </p>
+
+              {/* Desired Category */}
+              <div className="space-y-2">
+                <Label htmlFor="desired_category">Desired Category (Optional)</Label>
+                <Input
+                  id="desired_category"
+                  value={formData.desired_category}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, desired_category: e.target.value }))
+                  }
+                  placeholder="e.g., electronics, clothing"
+                  className="bg-slate-50"
+                />
+                <p className="text-xs text-slate-500">
+                  What category of items are you interested in trading for?
+                </p>
+              </div>
+
+              {/* Desired Items */}
+              <div className="space-y-2">
+                <Label>Specific Items You're Interested In (Optional)</Label>
+                <Input
+                  placeholder="Search items..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="bg-slate-50"
+                  onFocus={fetchAvailableItems}
+                />
+                {showPreferences && (
+                  <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-2">
+                    {isLoadingItems ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader2 className="w-5 h-5 text-indigo-600 spinner" />
+                      </div>
+                    ) : filteredItems.length === 0 ? (
+                      <p className="text-sm text-slate-500 text-center py-4">
+                        No items found
+                      </p>
+                    ) : (
+                      filteredItems.slice(0, 10).map((item) => (
+                        <div
+                          key={item.item_id}
+                          onClick={() => handleToggleItem(item.item_id)}
+                          className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${
+                            formData.desired_item_ids?.includes(item.item_id)
+                              ? "bg-indigo-50 border border-indigo-200"
+                              : "hover:bg-slate-50 border border-transparent"
+                          }`}
+                        >
+                          <img
+                            src={item.image}
+                            alt={item.title}
+                            className="w-12 h-12 object-cover rounded"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-900 truncate">
+                              {item.title}
+                            </p>
+                            <p className="text-xs text-slate-500">{item.category}</p>
+                          </div>
+                          {formData.desired_item_ids?.includes(item.item_id) && (
+                            <div className="text-indigo-600">✓</div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+                {formData.desired_item_ids.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {formData.desired_item_ids.map((itemId) => {
+                      const item = availableItems.find((i) => i.item_id === itemId);
+                      if (!item) return null;
+                      return (
+                        <Badge
+                          key={itemId}
+                          variant="secondary"
+                          className="flex items-center gap-1"
+                        >
+                          {item.title}
+                          <X
+                            className="w-3 h-3 cursor-pointer"
+                            onClick={() => handleToggleItem(itemId)}
+                          />
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
 
           {/* Submit */}
           <div className="flex gap-4 pt-4">

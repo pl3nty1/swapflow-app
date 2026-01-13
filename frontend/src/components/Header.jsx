@@ -1,4 +1,6 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useEffect, useState, useCallback } from "react";
+import axios from "axios";
 import { useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,13 +14,43 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ArrowLeftRight, Plus, MessageCircle, User, LogOut, Package, Shield } from "lucide-react";
 
 export const Header = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, API, getAuthHeaders } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const handleLogout = async () => {
     await logout();
     navigate("/");
   };
+
+  const fetchUnreadCount = useCallback(async () => {
+    if (!user) return;
+    try {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API}/messages/unread-count`, {
+        withCredentials: true,
+        headers: headers
+      });
+      setUnreadCount(response.data.unread_count || 0);
+    } catch (error) {
+      console.error("Failed to fetch unread count:", error);
+    }
+  }, [user, API, getAuthHeaders]);
+
+  useEffect(() => {
+    fetchUnreadCount();
+    // Poll for unread count every 10 seconds
+    const interval = setInterval(fetchUnreadCount, 10000);
+    return () => clearInterval(interval);
+  }, [fetchUnreadCount]);
+
+  // Refresh unread count when navigating to/from messages
+  useEffect(() => {
+    if (location.pathname === "/messages" || location.pathname.startsWith("/messages/")) {
+      fetchUnreadCount();
+    }
+  }, [location.pathname, fetchUnreadCount]);
 
   const getInitials = (name) => {
     if (!name) return "U";
@@ -61,10 +93,17 @@ export const Header = () => {
               variant="ghost"
               size="icon"
               onClick={() => navigate("/messages")}
-              className="text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+              className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 relative"
               data-testid="messages-btn"
             >
               <MessageCircle className="w-5 h-5" />
+              {unreadCount > 0 && (
+                <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full border-2 border-white flex items-center justify-center">
+                  <span className="text-xs text-white font-bold">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                </div>
+              )}
             </Button>
 
             {/* Trades */}

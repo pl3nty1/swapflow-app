@@ -21,6 +21,7 @@ const Messages = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef(null);
+  const wsRef = useRef(null);
 
   const fetchConversations = useCallback(async () => {
     try {
@@ -85,8 +86,87 @@ const Messages = () => {
   useEffect(() => {
     if (partnerId) {
       fetchMessages();
+      // Mark messages as read when viewing conversation
+      const markAsRead = async () => {
+        try {
+          const headers = getAuthHeaders();
+          await axios.post(
+            `${API}/messages/${partnerId}/mark-read`,
+            {},
+            { withCredentials: true, headers: headers }
+          );
+          fetchConversations(); // Refresh to update unread counts
+        } catch (error) {
+          console.error("Failed to mark messages as read:", error);
+        }
+      };
+      markAsRead();
     }
-  }, [partnerId, fetchMessages]);
+  }, [partnerId, fetchMessages, API, getAuthHeaders, fetchConversations]);
+
+  // WebSocket connection
+  useEffect(() => {
+    const connectWebSocket = () => {
+      const token = localStorage.getItem("session_token");
+      if (!token) return;
+
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsHost = API.replace(/^https?:\/\//, "").replace(/^http:\/\//, "");
+      const wsUrl = `${wsProtocol}//${wsHost}/ws/messages?token=${token}`;
+
+      try {
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          console.log("WebSocket connected");
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "new_message") {
+              const newMsg = data.message;
+              // Add message if it's for current conversation
+              if (partnerId && (newMsg.sender_id === partnerId || newMsg.receiver_id === partnerId)) {
+                setMessages((prev) => {
+                  // Avoid duplicates
+                  if (prev.some((m) => m.message_id === newMsg.message_id)) {
+                    return prev;
+                  }
+                  return [...prev, newMsg];
+                });
+              }
+              // Refresh conversations to update unread counts
+              fetchConversations();
+            }
+          } catch (error) {
+            console.error("Failed to parse WebSocket message:", error);
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.error("WebSocket error:", error);
+        };
+
+        ws.onclose = () => {
+          console.log("WebSocket disconnected, reconnecting...");
+          // Reconnect after 3 seconds
+          setTimeout(connectWebSocket, 3000);
+        };
+      } catch (error) {
+        console.error("Failed to connect WebSocket:", error);
+      }
+    };
+
+    connectWebSocket();
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [API, partnerId, fetchConversations]);
 
   useEffect(() => {
     // Auto-scroll to bottom
@@ -179,33 +259,49 @@ const Messages = () => {
                   No conversations yet
                 </div>
               ) : (
-                conversations.map((conv) => (
-                  <div
-                    key={conv.partner.user_id}
-                    onClick={() => navigate(`/messages/${conv.partner.user_id}`)}
-                    className={`p-4 cursor-pointer hover:bg-slate-50 transition-colors border-b border-slate-50 ${
-                      partnerId === conv.partner.user_id ? "bg-slate-50" : ""
-                    }`}
-                    data-testid={`conversation-${conv.partner.user_id}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-10 w-10">
-                        <AvatarImage src={conv.partner.picture} alt={conv.partner.name} />
-                        <AvatarFallback className="bg-indigo-100 text-indigo-600">
-                          {getInitials(conv.partner.name)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-900 truncate">
-                          {conv.partner.username || conv.partner.name}
-                        </p>
-                        <p className="text-sm text-slate-500 truncate">
-                          {conv.last_message}
-                        </p>
+                conversations.map((conv) => {
+                  const unreadCount = conv.unread_count || 0;
+                  const hasUnread = unreadCount > 0;
+                  return (
+                    <div
+                      key={conv.partner.user_id}
+                      onClick={() => navigate(`/messages/${conv.partner.user_id}`)}
+                      className={`p-4 cursor-pointer hover:bg-slate-50 transition-colors border-b border-slate-50 ${
+                        partnerId === conv.partner.user_id ? "bg-slate-50" : ""
+                      } ${hasUnread ? "bg-indigo-50" : ""}`}
+                      data-testid={`conversation-${conv.partner.user_id}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <Avatar className="h-10 w-10">
+                            <AvatarImage src={conv.partner.picture} alt={conv.partner.name} />
+                            <AvatarFallback className="bg-indigo-100 text-indigo-600">
+                              {getInitials(conv.partner.name)}
+                            </AvatarFallback>
+                          </Avatar>
+                          {hasUnread && (
+                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white flex items-center justify-center">
+                              <span className="text-xs text-white font-bold">{unreadCount > 9 ? "9+" : unreadCount}</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className={`font-medium truncate ${hasUnread ? "font-semibold" : ""}`}>
+                              {conv.partner.username || conv.partner.name}
+                            </p>
+                            {hasUnread && (
+                              <div className="w-2 h-2 bg-red-500 rounded-full flex-shrink-0" />
+                            )}
+                          </div>
+                          <p className={`text-sm truncate ${hasUnread ? "text-slate-900 font-medium" : "text-slate-500"}`}>
+                            {conv.last_message}
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </ScrollArea>
           </div>

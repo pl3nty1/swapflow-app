@@ -32,6 +32,10 @@ const ItemDetail = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isTradeOpen, setIsTradeOpen] = useState(false);
   const [isCreatingTrade, setIsCreatingTrade] = useState(false);
+  const [myItems, setMyItems] = useState([]);
+  const [selectedItemId, setSelectedItemId] = useState(null);
+  const [isLoadingItems, setIsLoadingItems] = useState(false);
+  const [preferredItems, setPreferredItems] = useState([]);
 
   const isOwner = user?.user_id === item?.user_id;
 
@@ -40,6 +44,20 @@ const ItemDetail = () => {
       const response = await axios.get(`${API}/items/${itemId}`, { withCredentials: true });
       setItem(response.data.item);
       setOwner(response.data.owner);
+      
+      // Fetch preferred items if desired_item_ids exist
+      if (response.data.item.desired_item_ids && response.data.item.desired_item_ids.length > 0) {
+        try {
+          const itemsResponse = await axios.get(`${API}/items`, { withCredentials: true });
+          const allItems = itemsResponse.data.items || [];
+          const preferred = allItems.filter((i) =>
+            response.data.item.desired_item_ids.includes(i.item_id)
+          );
+          setPreferredItems(preferred);
+        } catch (error) {
+          console.error("Failed to fetch preferred items:", error);
+        }
+      }
     } catch (error) {
       console.error("Failed to fetch item:", error);
       toast.error("Item not found");
@@ -92,21 +110,46 @@ const ItemDetail = () => {
     }
   };
 
+  const fetchMyItems = useCallback(async () => {
+    setIsLoadingItems(true);
+    try {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API}/my-items`, {
+        withCredentials: true,
+        headers: headers
+      });
+      // Filter to only available items
+      const availableItems = response.data.filter(item => item.is_available);
+      setMyItems(availableItems);
+    } catch (error) {
+      console.error("Failed to fetch items:", error);
+      toast.error("Failed to load your items");
+    } finally {
+      setIsLoadingItems(false);
+    }
+  }, [API, getAuthHeaders]);
+
+  const handleOpenTradeDialog = () => {
+    setIsTradeOpen(true);
+    setSelectedItemId(null);
+    fetchMyItems();
+  };
+
   const handleStartTrade = async () => {
+    if (!selectedItemId) {
+      toast.error("Please select an item to trade");
+      return;
+    }
+
     setIsCreatingTrade(true);
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:87',message:'handleStartTrade entry',data:{hasGetAuthHeaders:typeof getAuthHeaders==='function',sessionToken:localStorage.getItem('session_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       const headers = getAuthHeaders();
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:90',message:'headers generated for trade',data:{headers:JSON.stringify(headers),hasAuth:!!headers.Authorization},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
 
       await axios.post(
         `${API}/trades`,
         {
           item_id: itemId,
+          trader_item_id: selectedItemId,
           owner_id: owner.user_id,
         },
         { 
@@ -116,11 +159,9 @@ const ItemDetail = () => {
       );
       toast.success("Trade initiated! Check your trades page.");
       setIsTradeOpen(false);
+      setSelectedItemId(null);
       navigate("/trades");
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:107',message:'start trade error',data:{status:error.response?.status,detail:error.response?.data?.detail,message:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       toast.error(error.response?.data?.detail || "Failed to start trade");
     } finally {
       setIsCreatingTrade(false);
@@ -227,6 +268,41 @@ const ItemDetail = () => {
               )}
             </div>
 
+            {/* Trade Preferences */}
+            {(item.desired_category || (item.desired_item_ids && item.desired_item_ids.length > 0)) && (
+              <div className="bg-indigo-50 rounded-2xl p-4 border border-indigo-100">
+                <p className="text-sm font-medium text-indigo-900 mb-3">Trade Preferences</p>
+                <p className="text-xs text-indigo-700 mb-3">
+                  These preferences are informational only. You can still trade for this item regardless.
+                </p>
+                {item.desired_category && (
+                  <div className="mb-3">
+                    <p className="text-sm text-slate-600 mb-1">Looking for category:</p>
+                    <Badge className="bg-indigo-100 text-indigo-700 border-0 capitalize">
+                      {item.desired_category}
+                    </Badge>
+                  </div>
+                )}
+                {preferredItems.length > 0 && (
+                  <div>
+                    <p className="text-sm text-slate-600 mb-2">Interested in:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {preferredItems.map((prefItem) => (
+                        <Badge
+                          key={prefItem.item_id}
+                          variant="secondary"
+                          className="cursor-pointer hover:bg-indigo-100"
+                          onClick={() => navigate(`/item/${prefItem.item_id}`)}
+                        >
+                          {prefItem.title}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Owner Card */}
             {owner && (
               <div
@@ -261,7 +337,7 @@ const ItemDetail = () => {
             {!isOwner && item.is_available && (
               <div className="flex gap-3">
                 <Button
-                  onClick={() => setIsTradeOpen(true)}
+                  onClick={handleOpenTradeDialog}
                   className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full py-6 shadow-lg hover:shadow-indigo-500/30 transition-all"
                   data-testid="trade-btn"
                 >
@@ -340,21 +416,70 @@ const ItemDetail = () => {
 
       {/* Trade Confirmation Dialog */}
       <Dialog open={isTradeOpen} onOpenChange={setIsTradeOpen}>
-        <DialogContent className="sm:max-w-md" data-testid="trade-modal">
+        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto" data-testid="trade-modal">
           <DialogHeader>
             <DialogTitle style={{ fontFamily: "Manrope, sans-serif" }}>
               Start Trade
             </DialogTitle>
             <DialogDescription>
-              Would you like to initiate a trade for "{item.title}"?
+              Select an item to trade for "{item.title}"
             </DialogDescription>
           </DialogHeader>
 
-          <div className="py-4">
+          <div className="py-4 space-y-4">
             <p className="text-sm text-slate-600">
-              Once you start a trade, you can message the owner to negotiate.
-              Both parties must click "Trade Finished" to complete the trade and earn points.
+              Choose one of your available items to trade. Both parties must confirm to complete the trade.
             </p>
+
+            {isLoadingItems ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 text-indigo-600 spinner" />
+              </div>
+            ) : myItems.length === 0 ? (
+              <div className="text-center py-8 bg-slate-50 rounded-lg">
+                <p className="text-slate-500 mb-4">You don't have any available items to trade.</p>
+                <Button
+                  onClick={() => {
+                    setIsTradeOpen(false);
+                    navigate("/post");
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-700"
+                >
+                  Post an Item
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {myItems.map((myItem) => (
+                  <div
+                    key={myItem.item_id}
+                    onClick={() => setSelectedItemId(myItem.item_id)}
+                    className={`p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                      selectedItemId === myItem.item_id
+                        ? "border-indigo-600 bg-indigo-50"
+                        : "border-slate-200 hover:border-indigo-300"
+                    }`}
+                  >
+                    <div className="flex gap-3">
+                      <img
+                        src={myItem.image}
+                        alt={myItem.title}
+                        className="w-16 h-16 object-cover rounded"
+                      />
+                      <div className="flex-1">
+                        <h4 className="font-medium text-slate-900">{myItem.title}</h4>
+                        <p className="text-sm text-slate-500">{myItem.category}</p>
+                      </div>
+                      {selectedItemId === myItem.item_id && (
+                        <div className="flex items-center text-indigo-600">
+                          ✓
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -363,7 +488,7 @@ const ItemDetail = () => {
             </Button>
             <Button
               onClick={handleStartTrade}
-              disabled={isCreatingTrade}
+              disabled={isCreatingTrade || !selectedItemId || myItems.length === 0}
               className="bg-indigo-600 hover:bg-indigo-700"
               data-testid="confirm-trade-btn"
             >

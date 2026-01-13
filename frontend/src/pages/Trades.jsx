@@ -9,7 +9,17 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Loader2, Check, MessageCircle, Star } from "lucide-react";
+import { Loader2, Check, MessageCircle, Star, X, ArrowLeftRight } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const Trades = () => {
   const navigate = useNavigate();
@@ -19,6 +29,8 @@ const Trades = () => {
   const [confirmingId, setConfirmingId] = useState(null);
   const [ratingModal, setRatingModal] = useState({ isOpen: false, trade: null, otherUser: null });
   const [isRating, setIsRating] = useState(false);
+  const [cancelDialog, setCancelDialog] = useState({ isOpen: false, tradeId: null });
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const fetchTrades = useCallback(async () => {
     try {
@@ -103,6 +115,26 @@ const Trades = () => {
     setRatingModal({ isOpen: true, trade: tradeData.trade, otherUser });
   };
 
+  const handleCancelTrade = async () => {
+    if (!cancelDialog.tradeId) return;
+    
+    setIsCancelling(true);
+    try {
+      const headers = getAuthHeaders();
+      await axios.delete(`${API}/trades/${cancelDialog.tradeId}`, {
+        withCredentials: true,
+        headers: headers
+      });
+      toast.success("Trade cancelled");
+      setCancelDialog({ isOpen: false, tradeId: null });
+      fetchTrades();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to cancel trade");
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   const getInitials = (name) => {
     if (!name) return "U";
     return name
@@ -113,11 +145,12 @@ const Trades = () => {
       .slice(0, 2);
   };
 
-  const activeTrades = trades.filter((t) => !t.trade.is_completed);
+  const activeTrades = trades.filter((t) => !t.trade.is_completed && !t.trade.is_cancelled);
   const completedTrades = trades.filter((t) => t.trade.is_completed);
+  const cancelledTrades = trades.filter((t) => t.trade.is_cancelled);
 
   const TradeCard = ({ tradeData }) => {
-    const { trade, item, owner, trader } = tradeData;
+    const { trade, item, trader_item, owner, trader } = tradeData;
     const isOwner = trade.owner_id === user.user_id;
     const otherUser = isOwner ? trader : owner;
     const myConfirmed = isOwner ? trade.owner_confirmed : trade.trader_confirmed;
@@ -125,6 +158,7 @@ const Trades = () => {
     const canRate =
       trade.is_completed &&
       (isOwner ? trade.owner_rating === null : trade.trader_rating === null);
+    const canCancel = !trade.is_completed && !trade.is_cancelled;
 
     return (
       <div
@@ -132,26 +166,62 @@ const Trades = () => {
         data-testid={`trade-card-${trade.trade_id}`}
       >
         <div className="flex gap-4">
-          {/* Item Image */}
-          <div
-            className="w-24 h-24 rounded-xl overflow-hidden flex-shrink-0 cursor-pointer"
-            onClick={() => navigate(`/item/${item.item_id}`)}
-          >
-            <img
-              src={item?.image}
-              alt={item?.title}
-              className="w-full h-full object-cover"
-            />
+          {/* Items - Both items side by side */}
+          <div className="flex gap-3 flex-shrink-0">
+            {/* Item being traded for */}
+            <div
+              className="w-24 h-24 rounded-xl overflow-hidden cursor-pointer border-2 border-indigo-200"
+              onClick={() => navigate(`/item/${item?.item_id}`)}
+            >
+              <img
+                src={item?.image}
+                alt={item?.title}
+                className="w-full h-full object-cover"
+              />
+            </div>
+            {/* Arrow */}
+            <div className="flex items-center text-slate-400">
+              <ArrowLeftRight className="w-5 h-5" />
+            </div>
+            {/* Item being offered */}
+            {trader_item && (
+              <div
+                className="w-24 h-24 rounded-xl overflow-hidden cursor-pointer border-2 border-indigo-200"
+                onClick={() => navigate(`/item/${trader_item?.item_id}`)}
+              >
+                <img
+                  src={trader_item?.image}
+                  alt={trader_item?.title}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            )}
           </div>
 
           {/* Details */}
           <div className="flex-1 min-w-0">
-            <h3
-              className="font-semibold text-slate-900 mb-1 truncate cursor-pointer hover:text-indigo-600"
-              onClick={() => navigate(`/item/${item.item_id}`)}
-            >
-              {item?.title}
-            </h3>
+            <div className="mb-2">
+              <div className="flex items-center gap-2 mb-1">
+                <h3
+                  className="font-semibold text-slate-900 truncate cursor-pointer hover:text-indigo-600"
+                  onClick={() => navigate(`/item/${item?.item_id}`)}
+                >
+                  {item?.title}
+                </h3>
+                <span className="text-slate-400">↔</span>
+                {trader_item && (
+                  <h3
+                    className="font-semibold text-slate-900 truncate cursor-pointer hover:text-indigo-600"
+                    onClick={() => navigate(`/item/${trader_item?.item_id}`)}
+                  >
+                    {trader_item?.title}
+                  </h3>
+                )}
+              </div>
+              {!trader_item && (
+                <p className="text-xs text-slate-500">Your item not available</p>
+              )}
+            </div>
 
             {/* Other User */}
             <div
@@ -191,9 +261,13 @@ const Trades = () => {
               <Badge className="bg-teal-600 mb-3">Trade Completed</Badge>
             )}
 
+            {trade.is_cancelled && (
+              <Badge className="bg-slate-400 mb-3">Trade Cancelled</Badge>
+            )}
+
             {/* Actions */}
             <div className="flex gap-2 flex-wrap">
-              {!trade.is_completed && !myConfirmed && (
+              {canCancel && !myConfirmed && (
                 <Button
                   onClick={() => handleConfirm(trade.trade_id)}
                   disabled={confirmingId === trade.trade_id}
@@ -206,6 +280,18 @@ const Trades = () => {
                     <Check className="w-4 h-4 mr-2" />
                   )}
                   Trade Finished
+                </Button>
+              )}
+
+              {canCancel && (
+                <Button
+                  variant="outline"
+                  onClick={() => setCancelDialog({ isOpen: true, tradeId: trade.trade_id })}
+                  className="rounded-full text-red-600 border-red-200 hover:bg-red-50"
+                  data-testid={`cancel-btn-${trade.trade_id}`}
+                >
+                  <X className="w-4 h-4 mr-2" />
+                  Cancel Trade
                 </Button>
               )}
 
@@ -272,6 +358,11 @@ const Trades = () => {
               <TabsTrigger value="completed" data-testid="completed-tab">
                 Completed ({completedTrades.length})
               </TabsTrigger>
+              {cancelledTrades.length > 0 && (
+                <TabsTrigger value="cancelled" data-testid="cancelled-tab">
+                  Cancelled ({cancelledTrades.length})
+                </TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="active" className="space-y-4">
@@ -293,6 +384,12 @@ const Trades = () => {
                 completedTrades.map((t) => <TradeCard key={t.trade.trade_id} tradeData={t} />)
               )}
             </TabsContent>
+
+            {cancelledTrades.length > 0 && (
+              <TabsContent value="cancelled" className="space-y-4">
+                {cancelledTrades.map((t) => <TradeCard key={t.trade.trade_id} tradeData={t} />)}
+              </TabsContent>
+            )}
           </Tabs>
         )}
       </main>
@@ -305,6 +402,35 @@ const Trades = () => {
         user={ratingModal.otherUser}
         isLoading={isRating}
       />
+
+      {/* Cancel Trade Confirmation Dialog */}
+      <AlertDialog open={cancelDialog.isOpen} onOpenChange={(open) => !open && setCancelDialog({ isOpen: false, tradeId: null })}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel Trade?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to cancel this trade? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCancelling}>Keep Trade</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleCancelTrade}
+              disabled={isCancelling}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isCancelling ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 spinner" />
+                  Cancelling...
+                </>
+              ) : (
+                "Cancel Trade"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
