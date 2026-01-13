@@ -130,9 +130,6 @@ const Messages = () => {
             if (data.type === "new_message") {
               const newMsg = data.message;
               
-              // Always refresh conversations list to show new messages
-              fetchConversations();
-              
               // Add message if it's for current conversation
               if (partnerId && (newMsg.sender_id === partnerId || newMsg.receiver_id === partnerId)) {
                 setMessages((prev) => {
@@ -155,15 +152,17 @@ const Messages = () => {
                       );
                       // Dispatch event to notify Header to refresh unread count
                       window.dispatchEvent(new CustomEvent('messagesRead'));
-                      fetchConversations(); // Refresh to update unread counts
                     } catch (error) {
                       console.error("Failed to mark message as read:", error);
                     }
                   };
                   markAsRead();
                 }
-              } else if (newMsg.receiver_id === user?.user_id) {
-                // If message is for us but we're not in that conversation, just refresh conversations
+              }
+              
+              // Always refresh conversations list to show updated last message and unread counts
+              // This ensures the list updates live even when just viewing the conversations
+              fetchConversations();
                 // This ensures the conversation list updates with new messages
                 fetchConversations();
               }
