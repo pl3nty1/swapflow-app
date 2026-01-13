@@ -17,10 +17,20 @@ from google.oauth2 import id_token
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# MongoDB connection with error handling
+mongo_url = os.environ.get('MONGO_URL')
+db_name = os.environ.get('DB_NAME', 'swapflow')
+
+if not mongo_url:
+    raise ValueError("MONGO_URL environment variable is not set. Please configure it in Vercel.")
+
+try:
+    client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
+    db = client[db_name]
+    logger.info(f"Connected to MongoDB database: {db_name}")
+except Exception as e:
+    logger.error(f"Failed to connect to MongoDB: {str(e)}")
+    raise
 
 # Create the main app
 app = FastAPI()
@@ -34,6 +44,12 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Log environment variable status (without exposing secrets)
+logger.info(f"MONGO_URL configured: {bool(os.environ.get('MONGO_URL'))}")
+logger.info(f"DB_NAME: {os.environ.get('DB_NAME', 'swapflow')}")
+logger.info(f"GOOGLE_CLIENT_ID configured: {bool(os.environ.get('GOOGLE_CLIENT_ID'))}")
+logger.info(f"CORS_ORIGINS: {os.environ.get('CORS_ORIGINS', 'default')}")
 
 # ============== MODELS ==============
 
@@ -662,7 +678,23 @@ async def upload_image(file: UploadFile = File(...), user: User = Depends(get_cu
 
 @api_router.get("/")
 async def root():
-    return {"message": "SwapFlow API"}
+    """Health check endpoint"""
+    try:
+        # Test MongoDB connection
+        await client.admin.command('ping')
+        return {
+            "message": "SwapFlow API",
+            "status": "healthy",
+            "database": "connected"
+        }
+    except Exception as e:
+        logger.error(f"Database health check failed: {str(e)}")
+        return {
+            "message": "SwapFlow API",
+            "status": "degraded",
+            "database": "disconnected",
+            "error": str(e)
+        }
 
 # Include the router in the main app
 app.include_router(api_router)
