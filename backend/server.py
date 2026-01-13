@@ -487,6 +487,37 @@ async def get_categories():
     categories = await db.categories.find({}, {"_id": 0}).sort("click_count", -1).to_list(50)
     return categories
 
+@api_router.delete("/admin/categories/{category_name}")
+async def admin_delete_category(category_name: str, admin: User = Depends(get_admin_user)):
+    """Delete a category (admin only)"""
+    category = await db.categories.find_one({"name": category_name}, {"_id": 0})
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    
+    # Delete the category
+    await db.categories.delete_one({"name": category_name})
+    
+    # Note: Items with this category will still have the category field, but the category won't appear in the categories list
+    # Optionally, you could update all items to remove the category or set it to "uncategorized"
+    
+    return {"message": "Category deleted"}
+
+@api_router.get("/admin/categories")
+async def admin_get_categories(admin: User = Depends(get_admin_user)):
+    """Get all categories with item counts (admin only)"""
+    categories = await db.categories.find({}, {"_id": 0}).sort("click_count", -1).to_list(100)
+    
+    # Add item count for each category
+    result = []
+    for cat in categories:
+        item_count = await db.items.count_documents({"category": cat["name"]})
+        result.append({
+            **cat,
+            "item_count": item_count
+        })
+    
+    return result
+
 # ============== MESSAGE ENDPOINTS ==============
 
 @api_router.get("/conversations")

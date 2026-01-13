@@ -47,6 +47,11 @@ const AdminDashboard = () => {
   const [items, setItems] = useState([]);
   const [itemsSearchQuery, setItemsSearchQuery] = useState("");
   const [deletingItemId, setDeletingItemId] = useState(null);
+  const [itemUsers, setItemUsers] = useState({}); // Map of user_id to user object
+  
+  // Categories
+  const [categories, setCategories] = useState([]);
+  const [deletingCategory, setDeletingCategory] = useState(null);
   
   // Trades
   const [trades, setTrades] = useState([]);
@@ -101,11 +106,58 @@ const AdminDashboard = () => {
         headers: headers
       });
       setItems(response.data);
+      
+      // Fetch user info for all unique user_ids
+      const uniqueUserIds = [...new Set(response.data.map(item => item.user_id))];
+      const userMap = {};
+      for (const userId of uniqueUserIds) {
+        try {
+          const userResponse = await axios.get(`${API}/users/${userId}`, {
+            withCredentials: true,
+            headers: headers
+          });
+          userMap[userId] = userResponse.data;
+        } catch (error) {
+          console.error(`Failed to fetch user ${userId}:`, error);
+        }
+      }
+      setItemUsers(userMap);
     } catch (error) {
       console.error("Failed to fetch items:", error);
       toast.error("Failed to load items");
     }
   }, [API, getAuthHeaders]);
+
+  const fetchCategories = useCallback(async () => {
+    try {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API}/admin/categories`, {
+        withCredentials: true,
+        headers: headers
+      });
+      setCategories(response.data);
+    } catch (error) {
+      console.error("Failed to fetch categories:", error);
+      toast.error("Failed to load categories");
+    }
+  }, [API, getAuthHeaders]);
+
+  const handleDeleteCategory = async () => {
+    if (!deletingCategory) return;
+    
+    try {
+      const headers = getAuthHeaders();
+      await axios.delete(`${API}/admin/categories/${deletingCategory}`, {
+        withCredentials: true,
+        headers: headers
+      });
+      toast.success("Category deleted");
+      setDeletingCategory(null);
+      fetchCategories();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to delete category");
+    }
+  };
 
   const fetchTrades = useCallback(async () => {
     try {
@@ -150,12 +202,14 @@ const AdminDashboard = () => {
       fetchUsers();
     } else if (activeTab === "items") {
       fetchItems();
+    } else if (activeTab === "categories") {
+      fetchCategories();
     } else if (activeTab === "trades") {
       fetchTrades();
     } else if (activeTab === "messages") {
       fetchMessages(0);
     }
-  }, [activeTab, fetchUsers, fetchItems, fetchTrades, fetchMessages]);
+  }, [activeTab, fetchUsers, fetchItems, fetchCategories, fetchTrades, fetchMessages]);
 
   const handlePromoteUser = async (userId) => {
     try {
@@ -272,6 +326,7 @@ const AdminDashboard = () => {
             <TabsTrigger value="stats">Statistics</TabsTrigger>
             <TabsTrigger value="users">Users</TabsTrigger>
             <TabsTrigger value="items">Posts</TabsTrigger>
+            <TabsTrigger value="categories">Categories</TabsTrigger>
             <TabsTrigger value="trades">Trades</TabsTrigger>
             <TabsTrigger value="messages">Messages</TabsTrigger>
           </TabsList>
@@ -456,30 +511,38 @@ const AdminDashboard = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredItems.map((item) => (
-                    <TableRow key={item.item_id}>
-                      <TableCell className="font-medium">{item.title}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{item.category}</Badge>
-                      </TableCell>
-                      <TableCell>{item.user_id}</TableCell>
-                      <TableCell>
-                        {item.is_available ? (
-                          <Badge variant="default" className="bg-green-600">Available</Badge>
-                        ) : (
-                          <Badge variant="outline">Unavailable</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {new Date(item.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => setDeletingItemId(item.item_id)}
-                          className="h-7"
-                        >
+                  {filteredItems.map((item) => {
+                    const owner = itemUsers[item.user_id];
+                    return (
+                      <TableRow 
+                        key={item.item_id}
+                        className="cursor-pointer hover:bg-slate-50"
+                        onClick={() => navigate(`/item/${item.item_id}`)}
+                      >
+                        <TableCell className="font-medium">{item.title}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{item.category}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          {owner ? (owner.username || owner.name || item.user_id) : item.user_id}
+                        </TableCell>
+                        <TableCell>
+                          {item.is_available ? (
+                            <Badge variant="default" className="bg-green-600">Available</Badge>
+                          ) : (
+                            <Badge variant="outline">Unavailable</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {new Date(item.created_at).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => setDeletingItemId(item.item_id)}
+                            className="h-7"
+                          >
                           <Trash2 className="w-3 h-3" />
                         </Button>
                       </TableCell>
@@ -523,6 +586,52 @@ const AdminDashboard = () => {
                       </TableCell>
                     </TableRow>
                   ))}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+
+          {/* Categories Tab */}
+          <TabsContent value="categories" className="space-y-4">
+            <div className="border rounded-lg">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Category Name</TableHead>
+                    <TableHead>Items Count</TableHead>
+                    <TableHead>Click Count</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {categories.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-slate-500 py-8">
+                        No categories found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    categories.map((category) => (
+                      <TableRow key={category.name}>
+                        <TableCell className="font-medium">
+                          <Badge variant="outline" className="capitalize">{category.name}</Badge>
+                        </TableCell>
+                        <TableCell>{category.item_count || 0}</TableCell>
+                        <TableCell>{category.click_count || 0}</TableCell>
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => setDeletingCategory(category.name)}
+                            className="h-7"
+                          >
+                            <Trash2 className="w-3 h-3 mr-1" />
+                            Delete
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
                 </TableBody>
               </Table>
             </div>
@@ -655,6 +764,27 @@ const AdminDashboard = () => {
               </Button>
               <Button variant="destructive" onClick={() => handleDeleteItem(deletingItemId)}>
                 Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Category Dialog */}
+        <Dialog open={!!deletingCategory} onOpenChange={() => setDeletingCategory(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete Category</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete the category "{deletingCategory}"? 
+                This will remove it from the categories list. Items with this category will still have the category field, but it won't appear in the categories list.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDeletingCategory(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={handleDeleteCategory}>
+                Delete Category
               </Button>
             </DialogFooter>
           </DialogContent>
