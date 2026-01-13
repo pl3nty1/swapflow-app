@@ -1,3 +1,5 @@
-[user]
-	email = github@emergent.sh
-	name = emergent-agent-e1
+[alias]
+    # Quick commit all changes with a message
+    save = "!f() { git add -A && git commit -m \"$1\"; }; f"
+    # Quick commit with timestamp
+    quick = "!git add -A && git commit -m \"Quick save: $(date +'%Y-%m-%d %H:%M:%S')\""
