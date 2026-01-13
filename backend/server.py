@@ -11,7 +11,35 @@ from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
 import base64
-from google.auth.transport import requests as google_requests
+
+# #region agent log
+import json
+try:
+    with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({"location":"server.py:14","message":"Attempting to import google.auth.transport.requests","data":{"hypothesis":"H1"},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+except:
+    pass
+# #endregion
+
+try:
+    from google.auth.transport import requests as google_requests
+    # #region agent log
+    try:
+        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"server.py:16","message":"Successfully imported google.auth.transport.requests","data":{"hypothesis":"H1"},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+    except:
+        pass
+    # #endregion
+except ImportError as e:
+    # #region agent log
+    try:
+        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"server.py:16","message":"Failed to import google.auth.transport.requests","data":{"error":str(e),"errorType":type(e).__name__,"hypothesis":"H1"},"timestamp":int(datetime.now(timezone.utc).timestamp()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+    except:
+        pass
+    # #endregion
+    raise
+
 from google.oauth2 import id_token
 
 ROOT_DIR = Path(__file__).parent
