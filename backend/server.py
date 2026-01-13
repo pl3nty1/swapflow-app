@@ -189,26 +189,8 @@ async def get_optional_user(request: Request) -> Optional[User]:
 @api_router.post("/auth/google")
 async def google_auth(request: Request, response: Response):
     """Authenticate with Google OAuth ID token"""
-    # #region agent log
-    import json
-    import time
-    try:
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:189","message":"/auth/google endpoint called","data":{"origin":request.headers.get("origin"),"referer":request.headers.get("referer"),"hasCredential":False},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
-    except:
-        pass
-    # #endregion
-
     body = await request.json()
     credential = body.get("credential")  # Google ID token
-    
-    # #region agent log
-    try:
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:193","message":"Credential received","data":{"hasCredential":bool(credential),"credentialLength":len(credential) if credential else 0},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
-    except:
-        pass
-    # #endregion
     
     if not credential:
         raise HTTPException(status_code=400, detail="Credential required")
@@ -287,16 +269,6 @@ async def google_auth(request: Request, response: Response):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
-    # Set cookie
-    # #region agent log
-    try:
-        origin = request.headers.get("origin", "unknown")
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:272","message":"Setting session cookie","data":{"sessionToken":session_token[:20]+"...","origin":origin,"userId":user_id},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
-    except:
-        pass
-    # #endregion
-
     # Set cookie - for cross-origin, we need samesite="none" and secure=True
     # Don't set domain to allow browser to handle it automatically
     response.set_cookie(
@@ -315,14 +287,6 @@ async def google_auth(request: Request, response: Response):
         user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    
-    # #region agent log
-    try:
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:290","message":"Auth endpoint success","data":{"userId":user_id,"hasUser":bool(user)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
-    except:
-        pass
-    # #endregion
     
     return {"user": user, "session_token": session_token}
 
