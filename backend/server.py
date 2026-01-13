@@ -11,36 +11,7 @@ from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
 import base64
-import json
-import time
-
-# #region agent log
-try:
-    with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({"location":"server.py:17","message":"Attempting to import google.auth.transport.requests","data":{"hypothesis":"H1"},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
-except:
-    pass
-# #endregion
-
-try:
-    from google.auth.transport import requests as google_requests
-    # #region agent log
-    try:
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:19","message":"Successfully imported google.auth.transport.requests","data":{"hypothesis":"H1"},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
-    except:
-        pass
-    # #endregion
-except ImportError as e:
-    # #region agent log
-    try:
-        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:19","message":"Failed to import google.auth.transport.requests","data":{"error":str(e),"errorType":type(e).__name__,"hypothesis":"H1"},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
-    except:
-        pass
-    # #endregion
-    raise
-
+from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
 ROOT_DIR = Path(__file__).parent
@@ -178,6 +149,17 @@ class RatingCreate(BaseModel):
 
 async def get_current_user(request: Request) -> User:
     """Get current user from session token in cookie or Authorization header"""
+    # #region agent log
+    import json
+    import time
+    try:
+        cookies = dict(request.cookies)
+        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"server.py:150","message":"get_current_user called","data":{"hasSessionCookie":"session_token" in cookies,"allCookies":list(cookies.keys()),"origin":request.headers.get("origin")},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H2"})+"\n")
+    except:
+        pass
+    # #endregion
+
     session_token = request.cookies.get("session_token")
     
     if not session_token:
@@ -186,6 +168,13 @@ async def get_current_user(request: Request) -> User:
             session_token = auth_header[7:]
     
     if not session_token:
+        # #region agent log
+        try:
+            with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"location":"server.py:160","message":"No session token found","data":{},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H2"})+"\n")
+        except:
+            pass
+        # #endregion
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     session = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
@@ -218,8 +207,26 @@ async def get_optional_user(request: Request) -> Optional[User]:
 @api_router.post("/auth/google")
 async def google_auth(request: Request, response: Response):
     """Authenticate with Google OAuth ID token"""
+    # #region agent log
+    import json
+    import time
+    try:
+        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"server.py:189","message":"/auth/google endpoint called","data":{"origin":request.headers.get("origin"),"referer":request.headers.get("referer"),"hasCredential":False},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+    except:
+        pass
+    # #endregion
+
     body = await request.json()
     credential = body.get("credential")  # Google ID token
+    
+    # #region agent log
+    try:
+        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"server.py:193","message":"Credential received","data":{"hasCredential":bool(credential),"credentialLength":len(credential) if credential else 0},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+    except:
+        pass
+    # #endregion
     
     if not credential:
         raise HTTPException(status_code=400, detail="Credential required")
@@ -299,6 +306,15 @@ async def google_auth(request: Request, response: Response):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
     # Set cookie
+    # #region agent log
+    try:
+        origin = request.headers.get("origin", "unknown")
+        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"server.py:272","message":"Setting session cookie","data":{"sessionToken":session_token[:20]+"...","origin":origin,"userId":user_id},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+    except:
+        pass
+    # #endregion
+
     response.set_cookie(
         key="session_token",
         value=session_token,
@@ -306,7 +322,8 @@ async def google_auth(request: Request, response: Response):
         secure=True,
         samesite="none",
         path="/",
-        max_age=7*24*60*60
+        max_age=7*24*60*60,
+        domain=None  # Let browser set domain automatically
     )
     
     # Get user data
@@ -314,6 +331,14 @@ async def google_auth(request: Request, response: Response):
         user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
+    # #region agent log
+    try:
+        with open('/Users/ronaldabberman/Downloads/New-website-Yuh-main/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"server.py:290","message":"Auth endpoint success","data":{"userId":user_id,"hasUser":bool(user)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"})+"\n")
+    except:
+        pass
+    # #endregion
     
     return {"user": user, "session_token": session_token}
 
@@ -758,12 +783,18 @@ cors_origins = os.environ.get('CORS_ORIGINS', 'https://swapflow-app.vercel.app')
 # Remove any empty strings and ensure we have valid origins
 cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
 
+# Add explicit OPTIONS handler for CORS preflight
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    return Response(status_code=200)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
     allow_origins=cors_origins if cors_origins else ['https://swapflow-app.vercel.app'],
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 @app.on_event("shutdown")
