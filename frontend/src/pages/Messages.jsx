@@ -311,14 +311,14 @@ const Messages = () => {
                             <p className={`font-medium truncate ${hasUnread ? "font-semibold" : ""}`}>
                               {conv.partner.username || conv.partner.name}
                             </p>
-                            {hasUnread && (
-                              <div className="w-2 h-2 bg-red-500 rounded-full flex-shrink-0" />
-                            )}
                           </div>
                           <p className={`text-sm truncate ${hasUnread ? "text-slate-900 font-medium" : "text-slate-500"}`}>
                             {conv.last_message}
                           </p>
                         </div>
+                        {hasUnread && (
+                          <div className="w-2 h-2 bg-red-500 rounded-full flex-shrink-0" />
+                        )}
                       </div>
                     </div>
                   );
