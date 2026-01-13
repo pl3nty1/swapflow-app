@@ -56,12 +56,20 @@ const ProtectedRoute = ({ children }) => {
       }
 
       try {
+        // Get session token from localStorage as fallback
+        const sessionToken = localStorage.getItem('session_token');
+        const headers = {};
+        if (sessionToken) {
+          headers['Authorization'] = `Bearer ${sessionToken}`;
+        }
+
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.js:54',message:'Sending /auth/me request',data:{url:`${API}/auth/me`},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H2"})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.js:58',message:'Sending /auth/me request',data:{url:`${API}/auth/me`,hasStoredToken:!!sessionToken,hasCookie:document.cookie.includes('session_token')},"timestamp":Date.now(),sessionId:"debug-session",runId:"run1",hypothesisId:"H2"})}).catch(()=>{});
         // #endregion
 
         const response = await axios.get(`${API}/auth/me`, { 
           withCredentials: true,
+          headers: headers,
           timeout: 10000 // 10 second timeout
         });
 
