@@ -14,6 +14,7 @@ import base64
 import json
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
+import re
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -37,6 +38,19 @@ _db = None
 
 # WebSocket connections - in-memory storage
 active_connections: dict[str, WebSocket] = {}
+notification_connections: dict[str, WebSocket] = {}
+
+# Predefined categories (50 categories)
+PREDEFINED_CATEGORIES = [
+    "electronics", "clothing", "books", "furniture", "sports", "toys", "collectibles",
+    "jewelry", "tools", "appliances", "musical-instruments", "art", "home-decor",
+    "kitchenware", "outdoor-gear", "pet-supplies", "baby-items", "games", "movies",
+    "music", "vehicles", "bikes", "computers", "phones", "cameras", "watches",
+    "shoes", "bags", "accessories", "beauty", "health", "fitness", "garden",
+    "office", "school", "craft-supplies", "vintage", "antiques", "handmade",
+    "food", "beverages", "plants", "seeds", "tickets", "vouchers", "services",
+    "cards", "coupons", "other"
+]
 
 def get_db():
     """Get MongoDB database connection (lazy initialization)"""
@@ -52,11 +66,14 @@ def get_db():
         raise ValueError("MONGO_URL environment variable is not set. Please configure it in Vercel.")
     
     try:
+        # Configure SSL for MongoDB Atlas - allow invalid certificates for local dev
+        # In production, use proper SSL certificates
         _client = AsyncIOMotorClient(
             mongo_url, 
             serverSelectionTimeoutMS=10000,
             connectTimeoutMS=10000,
-            socketTimeoutMS=10000
+            socketTimeoutMS=10000,
+            tlsAllowInvalidCertificates=True  # For local dev - allows connection without proper SSL certs
         )
         _db = _client[db_name]
         logger.info(f"Connected to MongoDB database: {db_name}")
@@ -66,7 +83,12 @@ def get_db():
         raise
 
 # Log environment variable status (without exposing secrets)
-logger.info(f"MONGO_URL configured: {bool(os.environ.get('MONGO_URL'))}")
+mongo_url_env = os.environ.get('MONGO_URL', '')
+mongo_url_masked = re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', mongo_url_env) if mongo_url_env else 'NOT_SET'
+mongo_url_host = re.search(r'@([^/]+)', mongo_url_env) if mongo_url_env else None
+mongo_url_host_str = mongo_url_host.group(1) if mongo_url_host else 'UNKNOWN'
+logger.info(f"MONGO_URL configured: {bool(mongo_url_env)}")
+logger.info(f"MONGO_URL host: {mongo_url_host_str}")
 logger.info(f"DB_NAME: {os.environ.get('DB_NAME', 'swapflow')}")
 logger.info(f"GOOGLE_CLIENT_ID configured: {bool(os.environ.get('GOOGLE_CLIENT_ID'))}")
 logger.info(f"CORS_ORIGINS: {os.environ.get('CORS_ORIGINS', 'default')}")
@@ -160,6 +182,14 @@ class TradeCreate(BaseModel):
 class RatingCreate(BaseModel):
     rating: int
 
+class Notification(BaseModel):
+    notification_id: str = Field(default_factory=lambda: f"notif_{uuid.uuid4().hex[:12]}")
+    user_id: str
+    type: str  # e.g., "trade_cancelled", "item_deleted", etc.
+    message: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    data: Optional[dict] = None  # Optional JSON for additional context
+
 # ============== AUTH HELPERS ==============
 
 async def get_current_user(request: Request) -> User:
@@ -186,6 +216,12 @@ async def get_current_user(request: Request) -> User:
     if expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Session expired")
     
+    # Update last activity timestamp for this session
+    await db.user_sessions.update_one(
+        {"session_token": session_token},
+        {"$set": {"last_accessed": datetime.now(timezone.utc).isoformat()}}
+    )
+    
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
@@ -209,6 +245,39 @@ async def get_admin_user(request: Request) -> User:
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+# ============== HELPER FUNCTIONS ==============
+
+async def create_and_send_notification(user_id: str, notification_type: str, message: str, data: Optional[dict] = None):
+    """Create a notification and send it via WebSocket if user is connected"""
+    notification = Notification(
+        user_id=user_id,
+        type=notification_type,
+        message=message,
+        data=data
+    )
+    
+    notification_dict = notification.model_dump()
+    notification_dict["created_at"] = notification_dict["created_at"].isoformat()
+    
+    # Insert notification into database
+    insert_dict = notification_dict.copy()
+    await db.notifications.insert_one(insert_dict)
+    
+    # Send via WebSocket if user is connected
+    if user_id in notification_connections:
+        try:
+            ws = notification_connections[user_id]
+            await ws.send_text(json.dumps({
+                "type": "new_notification",
+                "notification": notification_dict
+            }))
+        except Exception as e:
+            logger.error(f"Failed to send notification via WebSocket: {str(e)}")
+            # Remove broken connection
+            notification_connections.pop(user_id, None)
+    
+    return notification_dict
 
 # ============== AUTH ENDPOINTS ==============
 
@@ -427,10 +496,10 @@ async def get_item(item_id: str):
 @api_router.post("/items")
 async def create_item(item_data: ItemCreate, user: User = Depends(get_current_user)):
     """Create a new item for trade"""
-    # Validate category is single word
+    # Validate category is one of the predefined categories
     category = item_data.category.strip().lower()
-    if " " in category:
-        raise HTTPException(status_code=400, detail="Category must be a single word")
+    if category not in PREDEFINED_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Category must be one of the predefined categories: {', '.join(PREDEFINED_CATEGORIES)}")
     
     item = Item(
         user_id=user.user_id,
@@ -452,13 +521,6 @@ async def create_item(item_data: ItemCreate, user: User = Depends(get_current_us
     insert_dict = item_dict.copy()
     await db.items.insert_one(insert_dict)
     
-    # Add/update category
-    await db.categories.update_one(
-        {"name": category},
-        {"$setOnInsert": {"name": category, "click_count": 0}},
-        upsert=True
-    )
-    
     return item_dict
 
 @api_router.delete("/items/{item_id}")
@@ -470,8 +532,44 @@ async def delete_item(item_id: str, user: User = Depends(get_current_user)):
     if item["user_id"] != user.user_id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
+    # Find all active trades involving this item
+    active_trades = await db.trades.find({
+        "$or": [
+            {"item_id": item_id, "is_completed": False, "is_cancelled": False},
+            {"trader_item_id": item_id, "is_completed": False, "is_cancelled": False}
+        ]
+    }, {"_id": 0}).to_list(100)
+    
+    # Cancel trades and create notifications
+    for trade in active_trades:
+        # Determine the other party
+        other_user_id = trade["trader_id"] if trade["owner_id"] == user.user_id else trade["owner_id"]
+        
+        # Get other user's info for notification
+        other_user = await db.users.find_one({"user_id": other_user_id}, {"_id": 0})
+        other_user_name = other_user.get("username") or other_user.get("name", "User") if other_user else "User"
+        
+        # Cancel the trade
+        await db.trades.update_one(
+            {"trade_id": trade["trade_id"]},
+            {"$set": {
+                "is_cancelled": True,
+                "cancelled_at": datetime.now(timezone.utc).isoformat(),
+                "cancelled_by": user.user_id
+            }}
+        )
+        
+        # Create notification for the other party
+        message = f"Your trade with {other_user_name} was canceled because {user.name} removed an item."
+        await create_and_send_notification(
+            user_id=other_user_id,
+            notification_type="trade_cancelled",
+            message=message,
+            data={"trade_id": trade["trade_id"], "item_id": item_id}
+        )
+    
     await db.items.delete_one({"item_id": item_id})
-    return {"message": "Item deleted"}
+    return {"message": "Item deleted", "trades_cancelled": len(active_trades)}
 
 @api_router.get("/my-items")
 async def get_my_items(user: User = Depends(get_current_user)):
@@ -482,10 +580,31 @@ async def get_my_items(user: User = Depends(get_current_user)):
 # ============== CATEGORY ENDPOINTS ==============
 
 @api_router.get("/categories")
-async def get_categories():
-    """Get all categories sorted by click count (most popular first)"""
-    categories = await db.categories.find({}, {"_id": 0}).sort("click_count", -1).to_list(50)
-    return categories
+async def get_categories(include_all: bool = False):
+    """Get categories. If include_all=True, returns all predefined categories. Otherwise, returns only categories with items."""
+    if include_all:
+        # Return all predefined categories
+        return [{"name": cat, "item_count": 0} for cat in PREDEFINED_CATEGORIES]
+    
+    # Get all available items and count by category
+    pipeline = [
+        {"$match": {"is_available": True}},
+        {"$group": {"_id": "$category", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}}
+    ]
+    category_counts = await db.items.aggregate(pipeline).to_list(100)
+    
+    # Return categories with their counts, only if they're in predefined list
+    result = []
+    for cat_data in category_counts:
+        category_name = cat_data["_id"]
+        if category_name in PREDEFINED_CATEGORIES:
+            result.append({
+                "name": category_name,
+                "item_count": cat_data["count"]
+            })
+    
+    return result
 
 @api_router.delete("/admin/categories/{category_name}")
 async def admin_delete_category(category_name: str, admin: User = Depends(get_admin_user)):
@@ -680,6 +799,77 @@ async def websocket_messages(websocket: WebSocket):
             active_connections.pop(user_id, None)
         await websocket.close()
 
+# ============== NOTIFICATION ENDPOINTS ==============
+
+@api_router.get("/notifications")
+async def get_notifications(user: User = Depends(get_current_user)):
+    """Get all notifications for current user (sorted by created_at desc)"""
+    notifications = await db.notifications.find(
+        {"user_id": user.user_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return notifications
+
+@api_router.get("/notifications/count")
+async def get_notification_count(user: User = Depends(get_current_user)):
+    """Get notification count for current user"""
+    count = await db.notifications.count_documents({"user_id": user.user_id})
+    return {"count": count}
+
+@api_router.post("/notifications/{notification_id}/dismiss")
+async def dismiss_notification(notification_id: str, user: User = Depends(get_current_user)):
+    """Dismiss/remove a notification"""
+    notification = await db.notifications.find_one({"notification_id": notification_id}, {"_id": 0})
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    if notification["user_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    await db.notifications.delete_one({"notification_id": notification_id})
+    return {"message": "Notification dismissed"}
+
+@api_router.websocket("/ws/notifications")
+async def websocket_notifications(websocket: WebSocket):
+    """WebSocket endpoint for real-time notification delivery"""
+    await websocket.accept()
+    user_id = None
+    
+    try:
+        # Get user from query params or headers
+        token = websocket.query_params.get("token") or websocket.headers.get("authorization", "").replace("Bearer ", "")
+        
+        if not token:
+            await websocket.close(code=1008, reason="Authentication required")
+            return
+        
+        # Get user from session token
+        session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+        if not session:
+            await websocket.close(code=1008, reason="Invalid session")
+            return
+        
+        user_id = session["user_id"]
+        notification_connections[user_id] = websocket
+        
+        # Send connection confirmation
+        await websocket.send_text(json.dumps({"type": "connected", "user_id": user_id}))
+        
+        # Keep connection alive and handle incoming messages
+        while True:
+            data = await websocket.receive_text()
+            # Handle ping/pong or other messages if needed
+            if data == "ping":
+                await websocket.send_text("pong")
+            
+    except WebSocketDisconnect:
+        if user_id:
+            notification_connections.pop(user_id, None)
+    except Exception as e:
+        logger.error(f"Notification WebSocket error: {str(e)}")
+        if user_id:
+            notification_connections.pop(user_id, None)
+        await websocket.close()
+
 # ============== TRADE ENDPOINTS ==============
 
 @api_router.post("/trades")
@@ -727,6 +917,19 @@ async def create_trade(trade_data: TradeCreate, user: User = Depends(get_current
     # Create a copy for insertion to avoid _id contamination
     insert_dict = trade_dict.copy()
     await db.trades.insert_one(insert_dict)
+    
+    # Create notification for the item owner
+    trader_user = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
+    trader_name = trader_user.get("username") or trader_user.get("name", "Someone") if trader_user else "Someone"
+    
+    notification_message = f"{trader_name} initiated a trade with you for \"{item['title']}\""
+    await create_and_send_notification(
+        user_id=item["user_id"],
+        notification_type="trade_initiated",
+        message=notification_message,
+        data={"trade_id": trade_dict["trade_id"], "item_id": trade_data.item_id}
+    )
+    
     return trade_dict
 
 @api_router.get("/trades")
@@ -931,6 +1134,22 @@ async def admin_get_users(admin: User = Depends(get_admin_user)):
     for user in users:
         if "is_admin" not in user:
             user["is_admin"] = False
+        
+        # Find most recent session activity for this user
+        # Prefer last_accessed, fallback to created_at
+        most_recent_session = await db.user_sessions.find_one(
+            {"user_id": user["user_id"]},
+            {"_id": 0, "last_accessed": 1, "created_at": 1},
+            sort=[("last_accessed", -1), ("created_at", -1)]
+        )
+        
+        if most_recent_session:
+            # Use last_accessed if available, otherwise use created_at
+            user["last_active"] = most_recent_session.get("last_accessed") or most_recent_session.get("created_at")
+        else:
+            # Fallback to user created_at if no sessions
+            user["last_active"] = user.get("created_at")
+    
     return users
 
 @api_router.get("/admin/stats")
@@ -962,16 +1181,55 @@ async def admin_delete_item(item_id: str, admin: User = Depends(get_admin_user))
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     
-    # Delete all active trades involving this item
-    deleted_trades = await db.trades.delete_many({
+    # Find all active trades involving this item
+    active_trades = await db.trades.find({
         "$or": [
             {"item_id": item_id, "is_completed": False, "is_cancelled": False},
             {"trader_item_id": item_id, "is_completed": False, "is_cancelled": False}
         ]
-    })
+    }, {"_id": 0}).to_list(100)
+    
+    # Cancel trades and create notifications
+    for trade in active_trades:
+        # Get both parties' info
+        owner = await db.users.find_one({"user_id": trade["owner_id"]}, {"_id": 0})
+        trader = await db.users.find_one({"user_id": trade["trader_id"]}, {"_id": 0})
+        
+        owner_name = owner.get("username") or owner.get("name", "User") if owner else "User"
+        trader_name = trader.get("username") or trader.get("name", "User") if trader else "User"
+        
+        # Cancel the trade
+        await db.trades.update_one(
+            {"trade_id": trade["trade_id"]},
+            {"$set": {
+                "is_cancelled": True,
+                "cancelled_at": datetime.now(timezone.utc).isoformat(),
+                "cancelled_by": admin.user_id
+            }}
+        )
+        
+        # Create notification for owner (if not the admin)
+        if trade["owner_id"] != admin.user_id:
+            message = f"Your trade with {trader_name} was canceled because admin removed an item."
+            await create_and_send_notification(
+                user_id=trade["owner_id"],
+                notification_type="trade_cancelled",
+                message=message,
+                data={"trade_id": trade["trade_id"], "item_id": item_id}
+            )
+        
+        # Create notification for trader (if not the admin)
+        if trade["trader_id"] != admin.user_id:
+            message = f"Your trade with {owner_name} was canceled because admin removed an item."
+            await create_and_send_notification(
+                user_id=trade["trader_id"],
+                notification_type="trade_cancelled",
+                message=message,
+                data={"trade_id": trade["trade_id"], "item_id": item_id}
+            )
     
     await db.items.delete_one({"item_id": item_id})
-    return {"message": "Item deleted by admin", "trades_deleted": deleted_trades.deleted_count}
+    return {"message": "Item deleted by admin", "trades_cancelled": len(active_trades)}
 
 @api_router.post("/admin/users/{user_id}/promote")
 async def admin_promote_user(user_id: str, admin: User = Depends(get_admin_user)):
@@ -1034,6 +1292,26 @@ async def admin_delete_user(user_id: str, admin: User = Depends(get_admin_user))
     # Note: Trades are kept for historical record, but could be deleted if needed
     
     return {"message": "User deleted"}
+
+@api_router.post("/admin/reset-database")
+async def admin_reset_database(admin: User = Depends(get_admin_user)):
+    """Reset entire database - DELETE ALL DATA (only for homemail192@gmail.com)"""
+    # Only allow the primary admin email
+    if admin.email.lower() != "homemail192@gmail.com":
+        raise HTTPException(status_code=403, detail="Only the primary admin can reset the database")
+    
+    # Delete all collections
+    await db.users.delete_many({})
+    await db.items.delete_many({})
+    await db.trades.delete_many({})
+    await db.messages.delete_many({})
+    await db.categories.delete_many({})
+    await db.notifications.delete_many({})
+    await db.user_sessions.delete_many({})
+    
+    logger.warning(f"Database reset by admin: {admin.email}")
+    
+    return {"message": "Database reset successfully. All data has been deleted."}
 
 @api_router.get("/admin/trades")
 async def admin_get_trades(admin: User = Depends(get_admin_user)):
@@ -1102,10 +1380,36 @@ async def root():
 # Include the router in the main app
 app.include_router(api_router)
 
-# CORS configuration
-cors_origins = os.environ.get('CORS_ORIGINS', 'https://swapflow-app.vercel.app').split(',')
-# Remove any empty strings and ensure we have valid origins
-cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
+# CORS configuration with auto-detection for localhost
+def get_cors_origins():
+    """Get CORS origins, automatically including localhost when running locally"""
+    # Get origins from environment variable
+    env_origins = os.environ.get('CORS_ORIGINS', 'https://swapflow-app.vercel.app').split(',')
+    env_origins = [origin.strip() for origin in env_origins if origin.strip()]
+    
+    # Check if we're running locally (not on Vercel)
+    # Vercel sets VERCEL environment variable
+    is_vercel = os.environ.get('VERCEL') == '1'
+    is_local = not is_vercel
+    
+    # If running locally, add localhost origins
+    if is_local:
+        localhost_origins = [
+            'http://localhost:3000',
+            'http://127.0.0.1:3000',
+            'http://localhost:3001',  # In case port 3000 is busy
+            'http://127.0.0.1:3001'
+        ]
+        # Merge localhost origins with environment origins, avoiding duplicates
+        all_origins = list(set(env_origins + localhost_origins))
+        logger.info(f"Running locally - CORS origins include localhost: {all_origins}")
+        return all_origins
+    
+    # Production: use only environment origins
+    logger.info(f"Running on Vercel - CORS origins: {env_origins}")
+    return env_origins
+
+cors_origins = get_cors_origins()
 
 # Add explicit OPTIONS handler for CORS preflight
 @app.options("/{full_path:path}")

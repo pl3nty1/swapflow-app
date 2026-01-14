@@ -1,5 +1,5 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
@@ -10,14 +10,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ArrowLeftRight, Plus, MessageCircle, User, LogOut, Package, Shield } from "lucide-react";
+import { ArrowLeftRight, Plus, MessageCircle, User, LogOut, Package, Shield, Bell, X } from "lucide-react";
 
 export const Header = () => {
   const { user, logout, API, getAuthHeaders } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [notifications, setNotifications] = useState([]);
+  const [notificationCount, setNotificationCount] = useState(0);
+  const notificationWsRef = useRef(null);
 
   const handleLogout = async () => {
     await logout();
@@ -36,7 +40,7 @@ export const Header = () => {
     } catch (error) {
       console.error("Failed to fetch unread count:", error);
     }
-  }, [user, API, getAuthHeaders]);
+  }, [user, API]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   useEffect(() => {
     fetchUnreadCount();
@@ -60,6 +64,106 @@ export const Header = () => {
     window.addEventListener('messagesRead', handleMessagesRead);
     return () => window.removeEventListener('messagesRead', handleMessagesRead);
   }, [fetchUnreadCount]);
+
+  // Fetch notifications
+  const fetchNotifications = useCallback(async () => {
+    if (!user) return;
+    try {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API}/notifications`, {
+        withCredentials: true,
+        headers: headers
+      });
+      setNotifications(response.data);
+      setNotificationCount(response.data.length);
+    } catch (error) {
+      console.error("Failed to fetch notifications:", error);
+    }
+  }, [user, API, getAuthHeaders]);
+
+  // WebSocket connection for notifications
+  useEffect(() => {
+    if (!user) return;
+
+    const connectNotificationWebSocket = () => {
+      const token = localStorage.getItem("session_token");
+      if (!token) return;
+
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsHost = API.replace(/^https?:\/\//, "").replace(/^http:\/\//, "");
+      const wsUrl = `${wsProtocol}//${wsHost}/ws/notifications?token=${token}`;
+
+      try {
+        const ws = new WebSocket(wsUrl);
+        notificationWsRef.current = ws;
+
+        ws.onopen = () => {
+          console.log("Notification WebSocket connected");
+          fetchNotifications(); // Fetch initial notifications
+        };
+
+        ws.onmessage = async (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "new_notification") {
+              setNotifications((prev) => [data.notification, ...prev]);
+              setNotificationCount((prev) => prev + 1);
+            }
+          } catch (error) {
+            console.error("Failed to parse notification WebSocket message:", error);
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.error("Notification WebSocket error:", error);
+        };
+
+        ws.onclose = () => {
+          console.log("Notification WebSocket disconnected, reconnecting...");
+          setTimeout(connectNotificationWebSocket, 3000);
+        };
+      } catch (error) {
+        console.error("Failed to connect notification WebSocket:", error);
+      }
+    };
+
+    connectNotificationWebSocket();
+
+    return () => {
+      if (notificationWsRef.current) {
+        notificationWsRef.current.close();
+      }
+    };
+  }, [user, API, fetchNotifications]);
+
+  const handleDismissNotification = async (notificationId) => {
+    try {
+      const headers = getAuthHeaders();
+      await axios.post(`${API}/notifications/${notificationId}/dismiss`, {}, {
+        withCredentials: true,
+        headers: headers
+      });
+      setNotifications((prev) => prev.filter((n) => n.notification_id !== notificationId));
+      setNotificationCount((prev) => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error("Failed to dismiss notification:", error);
+    }
+  };
+
+  const formatTimeAgo = (dateStr) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  };
 
   const getInitials = (name) => {
     if (!name) return "U";
@@ -114,6 +218,65 @@ export const Header = () => {
                 </div>
               )}
             </Button>
+
+            {/* Notifications */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 relative"
+                  data-testid="notifications-btn"
+                >
+                  <Bell className="w-5 h-5" />
+                  {notificationCount > 0 && (
+                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full border-2 border-white flex items-center justify-center">
+                      <span className="text-xs text-white font-bold">
+                        {notificationCount > 9 ? "9+" : notificationCount}
+                      </span>
+                    </div>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-80" align="end" forceMount>
+                <div className="p-3 border-b">
+                  <p className="font-semibold text-slate-900">Notifications</p>
+                </div>
+                <ScrollArea className="h-[400px]">
+                  {notifications.length === 0 ? (
+                    <div className="p-4 text-center text-slate-500 text-sm">
+                      No notifications
+                    </div>
+                  ) : (
+                    <div className="py-2">
+                      {notifications.map((notification) => (
+                        <div
+                          key={notification.notification_id}
+                          className="px-4 py-3 hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-slate-900">{notification.message}</p>
+                              <p className="text-xs text-slate-500 mt-1">
+                                {formatTimeAgo(notification.created_at)}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 flex-shrink-0"
+                              onClick={() => handleDismissNotification(notification.notification_id)}
+                            >
+                              <X className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {/* Trades */}
             <Button

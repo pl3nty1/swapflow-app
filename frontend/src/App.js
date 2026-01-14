@@ -15,7 +15,26 @@ import MyItems from "@/pages/MyItems";
 import Trades from "@/pages/Trades";
 import AdminDashboard from "@/pages/AdminDashboard";
 
-const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://swapflow-app-uj7o.vercel.app').replace(/\/+$/, ''); // Remove trailing slashes
+// Auto-detect backend URL based on environment
+const getBackendURL = () => {
+  // If explicitly set via environment variable, use it
+  if (process.env.REACT_APP_BACKEND_URL) {
+    return process.env.REACT_APP_BACKEND_URL.replace(/\/+$/, '');
+  }
+  
+  // Auto-detect: if running on localhost, use local backend
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+      return 'http://localhost:8000';
+    }
+  }
+  
+  // Default to production URL
+  return 'https://swapflow-app-uj7o.vercel.app';
+};
+
+const BACKEND_URL = getBackendURL();
 const API = `${BACKEND_URL}/api`;
 
 // Auth Context

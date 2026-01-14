@@ -25,7 +25,17 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Loader2, Shield, Trash2, ArrowUp, ArrowDown, Search, Users, Package, MessageSquare, ArrowLeftRight } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Loader2, Shield, Trash2, ArrowUp, ArrowDown, Search, Users, Package, MessageSquare, ArrowLeftRight, AlertTriangle, ChevronDown } from "lucide-react";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -61,6 +71,10 @@ const AdminDashboard = () => {
   const [messagesPage, setMessagesPage] = useState(0);
   const [messagesTotal, setMessagesTotal] = useState(0);
   const messagesLimit = 50;
+  
+  // Database reset
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   // Check if user is admin
   useEffect(() => {
@@ -82,7 +96,7 @@ const AdminDashboard = () => {
       console.error("Failed to fetch stats:", error);
       toast.error("Failed to load statistics");
     }
-  }, [API, getAuthHeaders]);
+  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -96,7 +110,7 @@ const AdminDashboard = () => {
       console.error("Failed to fetch users:", error);
       toast.error("Failed to load users");
     }
-  }, [API, getAuthHeaders]);
+  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   const fetchItems = useCallback(async () => {
     try {
@@ -126,7 +140,7 @@ const AdminDashboard = () => {
       console.error("Failed to fetch items:", error);
       toast.error("Failed to load items");
     }
-  }, [API, getAuthHeaders]);
+  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -140,7 +154,7 @@ const AdminDashboard = () => {
       console.error("Failed to fetch categories:", error);
       toast.error("Failed to load categories");
     }
-  }, [API, getAuthHeaders]);
+  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   const handleDeleteCategory = async () => {
     if (!deletingCategory) return;
@@ -171,7 +185,7 @@ const AdminDashboard = () => {
       console.error("Failed to fetch trades:", error);
       toast.error("Failed to load trades");
     }
-  }, [API, getAuthHeaders]);
+  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   const fetchMessages = useCallback(async (page = 0) => {
     try {
@@ -270,6 +284,31 @@ const AdminDashboard = () => {
       fetchStats();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to delete item");
+    }
+  };
+
+  const handleResetDatabase = async () => {
+    setIsResetting(true);
+    try {
+      const headers = getAuthHeaders();
+      await axios.post(`${API}/admin/reset-database`, {}, {
+        withCredentials: true,
+        headers: headers
+      });
+      toast.success("Database reset successfully. All data has been deleted.");
+      setResetDialogOpen(false);
+      // Refresh stats
+      fetchStats();
+      // Optionally refresh other tabs
+      if (activeTab === "users") fetchUsers();
+      if (activeTab === "items") fetchItems();
+      if (activeTab === "categories") fetchCategories();
+      if (activeTab === "trades") fetchTrades();
+      if (activeTab === "messages") fetchMessages(0);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to reset database");
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -395,6 +434,39 @@ const AdminDashboard = () => {
                 </Card>
               </div>
             )}
+            
+            {/* Reset Database Button - Only for homemail192@gmail.com - Hidden at bottom */}
+            {user?.email?.toLowerCase() === "homemail192@gmail.com" && (
+              <div className="mt-8 pt-8 border-t border-slate-200">
+                <details className="group">
+                  <summary className="cursor-pointer list-none flex items-center justify-between text-sm text-slate-500 hover:text-slate-700">
+                    <span className="flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-slate-400" />
+                      Danger Zone
+                    </span>
+                    <ChevronDown className="w-4 h-4 transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <div className="space-y-3">
+                      <div>
+                        <p className="font-semibold text-red-900 text-sm">Reset Entire Database</p>
+                        <p className="text-xs text-red-700 mt-1">This will permanently delete all data. This action cannot be undone.</p>
+                      </div>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => setResetDialogOpen(true)}
+                        className="bg-red-600 hover:bg-red-700 text-xs"
+                        data-testid="reset-database-btn"
+                      >
+                        <Trash2 className="w-3 h-3 mr-2" />
+                        Reset Database
+                      </Button>
+                    </div>
+                  </div>
+                </details>
+              </div>
+            )}
           </TabsContent>
 
           {/* Users Tab */}
@@ -419,6 +491,7 @@ const AdminDashboard = () => {
                     <TableHead>Username</TableHead>
                     <TableHead>Trade Points</TableHead>
                     <TableHead>Rating</TableHead>
+                    <TableHead>Last Active</TableHead>
                     <TableHead>Admin</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
@@ -543,11 +616,12 @@ const AdminDashboard = () => {
                             onClick={() => setDeletingItemId(item.item_id)}
                             className="h-7"
                           >
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -789,6 +863,49 @@ const AdminDashboard = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Reset Database Dialog */}
+        <AlertDialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+                <AlertTriangle className="w-5 h-5" />
+                Reset Database?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="pt-2">
+                <p className="font-semibold mb-2">This action cannot be undone!</p>
+                <p>This will permanently delete:</p>
+                <ul className="list-disc list-inside mt-2 space-y-1 text-sm">
+                  <li>All users (except you will remain logged in)</li>
+                  <li>All items/posts</li>
+                  <li>All trades</li>
+                  <li>All messages</li>
+                  <li>All categories</li>
+                  <li>All notifications</li>
+                  <li>All user sessions</li>
+                </ul>
+                <p className="mt-4 font-semibold text-red-600">Are you absolutely sure you want to proceed?</p>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isResetting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleResetDatabase}
+                disabled={isResetting}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                {isResetting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 spinner" />
+                    Resetting...
+                  </>
+                ) : (
+                  "Yes, Reset Database"
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </main>
     </div>
   );

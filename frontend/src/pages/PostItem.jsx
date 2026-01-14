@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "@/App";
@@ -8,6 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { ImagePlus, X, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import imageCompression from "browser-image-compression";
@@ -36,6 +43,8 @@ const PostItem = () => {
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isCompressing, setIsCompressing] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(false);
 
   const handleImageChange = async (e) => {
     const file = e.target.files?.[0];
@@ -105,6 +114,25 @@ const PostItem = () => {
     }
   };
 
+  const fetchCategories = useCallback(async () => {
+    setIsLoadingCategories(true);
+    try {
+      // Fetch all predefined categories for posting (include_all=true)
+      const response = await axios.get(`${API}/categories?include_all=true`, { withCredentials: true });
+      // Sort categories alphabetically
+      const sorted = response.data.sort((a, b) => a.name.localeCompare(b.name));
+      setCategories(sorted);
+    } catch (error) {
+      console.error("Failed to fetch categories:", error);
+    } finally {
+      setIsLoadingCategories(false);
+    }
+  }, [API]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
+
   const fetchAvailableItems = async () => {
     setIsLoadingItems(true);
     try {
@@ -130,7 +158,7 @@ const PostItem = () => {
 
   const filteredItems = availableItems.filter(
     (item) =>
-      item.item_id !== formData.title && // Exclude current item if it exists
+      !formData.desired_item_ids?.includes(item.item_id) && // Exclude already selected items
       (searchQuery === "" ||
         item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.category.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -148,11 +176,7 @@ const PostItem = () => {
       return;
     }
     if (!formData.category.trim()) {
-      toast.error("Please enter a category");
-      return;
-    }
-    if (formData.category.includes(" ")) {
-      toast.error("Category must be a single word");
+      toast.error("Please select a category");
       return;
     }
 
@@ -291,19 +315,24 @@ const PostItem = () => {
           {/* Category */}
           <div className="space-y-2">
             <Label htmlFor="category">Category *</Label>
-            <Input
-              id="category"
+            <Select
               value={formData.category}
-              onChange={(e) =>
-                setFormData((prev) => ({ ...prev, category: e.target.value }))
+              onValueChange={(value) =>
+                setFormData((prev) => ({ ...prev, category: value }))
               }
-              placeholder="e.g., electronics, clothing, books"
-              className="bg-slate-50"
-              data-testid="category-input"
-            />
-            <p className="text-xs text-slate-500">
-              Single word only (e.g., "electronics" not "electronic items")
-            </p>
+              disabled={isLoadingCategories}
+            >
+              <SelectTrigger className="bg-slate-50" id="category" data-testid="category-select">
+                <SelectValue placeholder="Select a category" />
+              </SelectTrigger>
+              <SelectContent>
+                {categories.map((category) => (
+                  <SelectItem key={category.name} value={category.name}>
+                    <span className="capitalize">{category.name}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Trade Preferences (Optional) */}

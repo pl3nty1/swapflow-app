@@ -76,13 +76,7 @@ const ItemDetail = () => {
 
     setIsSending(true);
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:61',message:'handleSendMessage entry',data:{hasGetAuthHeaders:typeof getAuthHeaders==='function',sessionToken:localStorage.getItem('session_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       const headers = getAuthHeaders();
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:63',message:'headers generated',data:{headers:JSON.stringify(headers),hasAuth:!!headers.Authorization},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
 
       await axios.post(
         `${API}/messages`,
@@ -101,9 +95,6 @@ const ItemDetail = () => {
       setIsMessageOpen(false);
       navigate(`/messages/${owner.user_id}`);
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ItemDetail.jsx:81',message:'send message error',data:{status:error.response?.status,detail:error.response?.data?.detail,message:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       toast.error("Failed to send message");
     } finally {
       setIsSending(false);
@@ -127,7 +118,7 @@ const ItemDetail = () => {
     } finally {
       setIsLoadingItems(false);
     }
-  }, [API, getAuthHeaders]);
+  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   const handleOpenTradeDialog = () => {
     setIsTradeOpen(true);

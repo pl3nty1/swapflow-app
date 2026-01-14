@@ -25,13 +25,7 @@ const Messages = () => {
 
   const fetchConversations = useCallback(async () => {
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:25',message:'fetchConversations entry',data:{hasGetAuthHeaders:typeof getAuthHeaders==='function',sessionToken:localStorage.getItem('session_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       const headers = getAuthHeaders();
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:27',message:'fetchConversations headers',data:{headers:JSON.stringify(headers),hasAuth:!!headers.Authorization},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       const response = await axios.get(`${API}/conversations`, { 
         withCredentials: true,
         headers: headers
@@ -45,19 +39,13 @@ const Messages = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [API, getAuthHeaders]);
+  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   const fetchMessages = useCallback(async () => {
     if (!partnerId) return;
 
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:36',message:'fetchMessages entry',data:{hasGetAuthHeaders:typeof getAuthHeaders==='function',sessionToken:localStorage.getItem('session_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       const headers = getAuthHeaders();
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:40',message:'fetchMessages headers',data:{headers:JSON.stringify(headers),hasAuth:!!headers.Authorization},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       const [messagesRes, partnerRes] = await Promise.all([
         axios.get(`${API}/messages/${partnerId}`, { 
           withCredentials: true,
@@ -71,13 +59,10 @@ const Messages = () => {
       setMessages(messagesRes.data);
       setPartner(partnerRes.data);
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:48',message:'fetchMessages error',data:{status:error.response?.status,detail:error.response?.data?.detail,message:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       console.error("Failed to fetch messages:", error);
       toast.error("Failed to load messages");
     }
-  }, [API, partnerId, getAuthHeaders]);
+  }, [API, partnerId]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   useEffect(() => {
     fetchConversations();
@@ -104,7 +89,7 @@ const Messages = () => {
       };
       markAsRead();
     }
-  }, [partnerId, fetchMessages, API, getAuthHeaders, fetchConversations]);
+  }, [partnerId, fetchMessages, API, fetchConversations]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   // WebSocket connection
   useEffect(() => {
@@ -190,7 +175,7 @@ const Messages = () => {
         wsRef.current.close();
       }
     };
-  }, [API, partnerId, fetchConversations, user, getAuthHeaders]);
+  }, [API, partnerId, fetchConversations, user]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   useEffect(() => {
     // Auto-scroll to bottom
@@ -203,13 +188,7 @@ const Messages = () => {
 
     setIsSending(true);
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:67',message:'handleSendMessage entry',data:{hasGetAuthHeaders:typeof getAuthHeaders==='function',sessionToken:localStorage.getItem('session_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       const headers = getAuthHeaders();
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:74',message:'headers generated',data:{headers:JSON.stringify(headers),hasAuth:!!headers.Authorization},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
 
       const response = await axios.post(
         `${API}/messages`,
@@ -222,13 +201,16 @@ const Messages = () => {
           headers: headers
         }
       );
-      setMessages((prev) => [...prev, response.data]);
+      // Only add message if it doesn't already exist (WebSocket might have already added it)
+      setMessages((prev) => {
+        if (prev.some((m) => m.message_id === response.data.message_id)) {
+          return prev;
+        }
+        return [...prev, response.data];
+      });
       setNewMessage("");
       fetchConversations(); // Refresh conversation list
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7e1d3f60-34a1-4d7e-99ac-6c65e0f8e90f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Messages.jsx:91',message:'send message error',data:{status:error.response?.status,detail:error.response?.data?.detail,message:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       toast.error("Failed to send message");
     } finally {
       setIsSending(false);
@@ -243,6 +225,12 @@ const Messages = () => {
       .join("")
       .toUpperCase()
       .slice(0, 2);
+  };
+
+  const truncateMessage = (message, maxLength = 50) => {
+    if (!message) return "No messages yet";
+    if (message.length <= maxLength) return message;
+    return message.substring(0, maxLength) + "...";
   };
 
   const formatTime = (dateStr) => {
@@ -296,23 +284,26 @@ const Messages = () => {
                       data-testid={`conversation-${conv.partner.user_id}`}
                     >
                       <div className="flex items-center gap-3">
-                        {hasUnread && (
-                          <div className="w-2 h-2 bg-red-500 rounded-full flex-shrink-0" />
-                        )}
-                        <Avatar className="h-10 w-10">
+                        <Avatar className="h-10 w-10 flex-shrink-0">
                           <AvatarImage src={conv.partner.picture} alt={conv.partner.name} />
                           <AvatarFallback className="bg-indigo-100 text-indigo-600">
                             {getInitials(conv.partner.name)}
                           </AvatarFallback>
                         </Avatar>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className={`font-medium truncate ${hasUnread ? "font-semibold" : ""}`}>
+                        <div className="flex-1 min-w-0 overflow-hidden">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <p className={`font-medium truncate flex-1 min-w-0 ${hasUnread ? "font-semibold" : ""}`}>
                               {conv.partner.username || conv.partner.name}
                             </p>
+                            {hasUnread && (
+                              <div className="w-2 h-2 bg-red-500 rounded-full flex-shrink-0" />
+                            )}
                           </div>
-                          <p className={`text-sm truncate ${hasUnread ? "text-slate-900 font-medium" : "text-slate-500"}`}>
-                            {conv.last_message}
+                          <p 
+                            className={`text-sm truncate ${hasUnread ? "text-slate-900 font-medium" : "text-slate-500"}`}
+                            title={conv.last_message || "No messages yet"}
+                          >
+                            {truncateMessage(conv.last_message, 35)}
                           </p>
                         </div>
                       </div>
