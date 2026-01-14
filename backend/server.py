@@ -129,6 +129,7 @@ class Item(BaseModel):
     is_available: bool = True
     desired_category: Optional[str] = None
     desired_item_ids: Optional[List[str]] = None
+    view_count: int = 0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ItemCreate(BaseModel):
@@ -145,22 +146,26 @@ class Category(BaseModel):
 
 class Message(BaseModel):
     message_id: str = Field(default_factory=lambda: f"msg_{uuid.uuid4().hex[:12]}")
+    trade_id: str  # Required, links message to specific trade
     sender_id: str
     receiver_id: str
-    item_id: Optional[str] = None
+    message_type: str = "text"  # "text", "item_request", "item_added", "item_removed"
+    item_request_data: Optional[dict] = None  # For item request messages: {"item_id": str, "side": "owner"|"trader", "status": "pending"|"accepted"|"declined", "request_id": str}
     content: str
     read_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: Optional[datetime] = None  # Set to 24 hours after trade completion
 
 class MessageCreate(BaseModel):
-    receiver_id: str
-    item_id: Optional[str] = None
+    trade_id: str
     content: str
 
 class Trade(BaseModel):
     trade_id: str = Field(default_factory=lambda: f"trade_{uuid.uuid4().hex[:12]}")
-    item_id: str
-    trader_item_id: str
+    owner_item_ids: List[str] = Field(default_factory=list)
+    trader_item_ids: List[str] = Field(default_factory=list)
+    pending_owner_items: List[str] = Field(default_factory=list)
+    pending_trader_items: List[str] = Field(default_factory=list)
     owner_id: str
     trader_id: str
     owner_confirmed: bool = False
@@ -173,11 +178,11 @@ class Trade(BaseModel):
     trader_rating: Optional[int] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
+    max_items_per_side: int = 5
 
 class TradeCreate(BaseModel):
-    item_id: str
-    trader_item_id: str
-    owner_id: str
+    owner_item_ids: List[str]
+    trader_item_ids: List[str]
 
 class RatingCreate(BaseModel):
     rating: int
@@ -458,7 +463,7 @@ async def update_profile(update: UserUpdate, user: User = Depends(get_current_us
 # ============== ITEM ENDPOINTS ==============
 
 @api_router.get("/items")
-async def get_items(category: Optional[str] = None, user_id: Optional[str] = None):
+async def get_items(category: Optional[str] = None, user_id: Optional[str] = None, include_owners: bool = False, sort_by_views: bool = False, limit: Optional[int] = None):
     """Get all available items, optionally filtered by category or user"""
     query = {"is_available": True}
     if category:
@@ -472,12 +477,34 @@ async def get_items(category: Optional[str] = None, user_id: Optional[str] = Non
     if user_id:
         query["user_id"] = user_id
     
-    items = await db.items.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    # Sort by view_count if requested, otherwise by created_at
+    sort_field = "view_count" if sort_by_views else "created_at"
+    sort_direction = -1
+    
+    items_cursor = db.items.find(query, {"_id": 0}).sort(sort_field, sort_direction)
+    
+    if limit:
+        items = await items_cursor.to_list(limit)
+    else:
+        items = await items_cursor.to_list(100)
     
     # Convert datetime strings if needed
     for item in items:
         if isinstance(item.get("created_at"), str):
             item["created_at"] = datetime.fromisoformat(item["created_at"])
+    
+    # If include_owners is true, bulk fetch owners
+    if include_owners:
+        owner_ids = list(set(item["user_id"] for item in items))
+        owners_dict = {}
+        if owner_ids:
+            owners_cursor = db.users.find({"user_id": {"$in": owner_ids}}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1})
+            async for owner in owners_cursor:
+                owners_dict[owner["user_id"]] = owner
+        
+        # Add owner info to each item
+        for item in items:
+            item["owner"] = owners_dict.get(item["user_id"])
     
     return items
 
@@ -487,6 +514,14 @@ async def get_item(item_id: str):
     item = await db.items.find_one({"item_id": item_id}, {"_id": 0})
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    
+    # Increment view count
+    await db.items.update_one(
+        {"item_id": item_id},
+        {"$inc": {"view_count": 1}},
+        upsert=False
+    )
+    item["view_count"] = item.get("view_count", 0) + 1
     
     # Get owner info
     owner = await db.users.find_one({"user_id": item["user_id"]}, {"_id": 0})
@@ -532,11 +567,13 @@ async def delete_item(item_id: str, user: User = Depends(get_current_user)):
     if item["user_id"] != user.user_id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
-    # Find all active trades involving this item
+    # Find all active trades involving this item (check both old and new format)
     active_trades = await db.trades.find({
         "$or": [
             {"item_id": item_id, "is_completed": False, "is_cancelled": False},
-            {"trader_item_id": item_id, "is_completed": False, "is_cancelled": False}
+            {"trader_item_id": item_id, "is_completed": False, "is_cancelled": False},
+            {"owner_item_ids": item_id, "is_completed": False, "is_cancelled": False},
+            {"trader_item_ids": item_id, "is_completed": False, "is_cancelled": False}
         ]
     }, {"_id": 0}).to_list(100)
     
@@ -583,8 +620,8 @@ async def get_my_items(user: User = Depends(get_current_user)):
 async def get_categories(include_all: bool = False):
     """Get categories. If include_all=True, returns all predefined categories. Otherwise, returns only categories with items."""
     if include_all:
-        # Return all predefined categories
-        return [{"name": cat, "item_count": 0} for cat in PREDEFINED_CATEGORIES]
+        # Return all predefined categories, sorted alphabetically for stability
+        return [{"name": cat, "item_count": 0} for cat in sorted(PREDEFINED_CATEGORIES)]
     
     # Get all available items and count by category
     pipeline = [
@@ -594,14 +631,17 @@ async def get_categories(include_all: bool = False):
     ]
     category_counts = await db.items.aggregate(pipeline).to_list(100)
     
+    # Create a dict for quick lookup
+    counts_dict = {cat_data["_id"]: cat_data["count"] for cat_data in category_counts}
+    
     # Return categories with their counts, only if they're in predefined list
+    # Sort alphabetically for stable order (not by count which can change)
     result = []
-    for cat_data in category_counts:
-        category_name = cat_data["_id"]
-        if category_name in PREDEFINED_CATEGORIES:
+    for category_name in sorted(PREDEFINED_CATEGORIES):
+        if category_name in counts_dict:
             result.append({
                 "name": category_name,
-                "item_count": cat_data["count"]
+                "item_count": counts_dict[category_name]
             })
     
     return result
@@ -641,65 +681,127 @@ async def admin_get_categories(admin: User = Depends(get_admin_user)):
 
 @api_router.get("/conversations")
 async def get_conversations(user: User = Depends(get_current_user)):
-    """Get all conversations for current user"""
-    # Find unique conversation partners
-    pipeline = [
-        {"$match": {"$or": [{"sender_id": user.user_id}, {"receiver_id": user.user_id}]}},
+    """Get all trade-based conversations for current user"""
+    # Get all trades user is involved in
+    trades = await db.trades.find({
+        "$or": [{"owner_id": user.user_id}, {"trader_id": user.user_id}],
+        "is_cancelled": False
+    }, {"_id": 0, "trade_id": 1, "owner_id": 1, "trader_id": 1, "is_completed": 1, "created_at": 1}).to_list(100)
+    
+    if not trades:
+        return []
+    
+    trade_ids = [trade["trade_id"] for trade in trades]
+    
+    # Bulk fetch last messages for all trades using aggregation (only trades with messages)
+    last_messages_pipeline = [
+        {"$match": {"trade_id": {"$in": trade_ids}}},
         {"$sort": {"created_at": -1}},
         {"$group": {
-            "_id": {
-                "$cond": [
-                    {"$eq": ["$sender_id", user.user_id]},
-                    "$receiver_id",
-                    "$sender_id"
-                ]
-            },
-            "last_message": {"$first": "$content"},
-            "last_message_time": {"$first": "$created_at"},
-            "item_id": {"$first": "$item_id"}
-        }},
-        {"$sort": {"last_message_time": -1}}
+            "_id": "$trade_id",
+            "content": {"$first": "$content"},
+            "created_at": {"$first": "$created_at"},
+            "message_type": {"$first": "$message_type"}
+        }}
     ]
+    last_messages = {}
+    async for msg in db.messages.aggregate(last_messages_pipeline):
+        last_messages[msg["_id"]] = msg
     
-    conversations = await db.messages.aggregate(pipeline).to_list(50)
+    # Bulk fetch unread counts using aggregation
+    unread_counts_pipeline = [
+        {"$match": {
+            "trade_id": {"$in": trade_ids},
+            "receiver_id": user.user_id,
+            "read_at": None
+        }},
+        {"$group": {
+            "_id": "$trade_id",
+            "count": {"$sum": 1}
+        }}
+    ]
+    unread_counts = {}
+    async for count_doc in db.messages.aggregate(unread_counts_pipeline):
+        unread_counts[count_doc["_id"]] = count_doc["count"]
     
-    # Get user info and unread count for each conversation
+    # Collect partner IDs
+    partner_ids = set()
+    for trade in trades:
+        partner_id = trade["trader_id"] if trade["owner_id"] == user.user_id else trade["owner_id"]
+        partner_ids.add(partner_id)
+    
+    # Bulk fetch partners
+    partners_dict = {}
+    if partner_ids:
+        partners_cursor = db.users.find({"user_id": {"$in": list(partner_ids)}}, {"_id": 0})
+        async for partner in partners_cursor:
+            partners_dict[partner["user_id"]] = partner
+    
+    # Cleanup expired messages once (not per trade)
+    completed_trade_ids = [t["trade_id"] for t in trades if t.get("is_completed")]
+    if completed_trade_ids:
+        now = datetime.now(timezone.utc)
+        await db.messages.delete_many({
+            "trade_id": {"$in": completed_trade_ids},
+            "expires_at": {"$lt": now.isoformat()}
+        })
+    
+    # Build result - include ALL trades, even those without messages
     result = []
-    for conv in conversations:
-        partner = await db.users.find_one({"user_id": conv["_id"]}, {"_id": 0})
+    for trade in trades:
+        trade_id = trade["trade_id"]
+        partner_id = trade["trader_id"] if trade["owner_id"] == user.user_id else trade["owner_id"]
+        partner = partners_dict.get(partner_id)
+        
         if partner:
-            # Count unread messages from this partner
-            unread_count = await db.messages.count_documents({
-                "sender_id": conv["_id"],
-                "receiver_id": user.user_id,
-                "read_at": None
-            })
-            
+            last_msg = last_messages.get(trade_id, {})
+            # If no messages, use trade creation time for sorting
+            last_message_time = last_msg.get("created_at") or trade.get("created_at")
             result.append({
+                "trade_id": trade_id,
                 "partner": partner,
-                "last_message": conv["last_message"],
-                "last_message_time": conv["last_message_time"],
-                "item_id": conv.get("item_id"),
-                "unread_count": unread_count
+                "last_message": last_msg.get("content"),
+                "last_message_time": last_message_time,
+                "unread_count": unread_counts.get(trade_id, 0),
+                "is_completed": trade.get("is_completed", False)
             })
+    
+    # Sort by last message time (or trade creation time if no messages)
+    result.sort(key=lambda x: x["last_message_time"] or "", reverse=True)
     
     return result
 
 @api_router.get("/messages/unread-count")
 async def get_unread_count(user: User = Depends(get_current_user)):
     """Get total unread message count for current user"""
+    # Get all trades user is involved in
+    trades = await db.trades.find({
+        "$or": [{"owner_id": user.user_id}, {"trader_id": user.user_id}]
+    }, {"_id": 0, "trade_id": 1}).to_list(100)
+    
+    trade_ids = [t["trade_id"] for t in trades]
+    
     count = await db.messages.count_documents({
+        "trade_id": {"$in": trade_ids},
         "receiver_id": user.user_id,
         "read_at": None
     })
     return {"unread_count": count}
 
-@api_router.post("/messages/{partner_id}/mark-read")
-async def mark_messages_read(partner_id: str, user: User = Depends(get_current_user)):
-    """Mark all messages from a partner as read"""
+@api_router.post("/messages/{trade_id}/mark-read")
+async def mark_messages_read(trade_id: str, user: User = Depends(get_current_user)):
+    """Mark all messages in a trade as read"""
+    # Verify user is part of the trade
+    trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    if trade["owner_id"] != user.user_id and trade["trader_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
     result = await db.messages.update_many(
         {
-            "sender_id": partner_id,
+            "trade_id": trade_id,
             "receiver_id": user.user_id,
             "read_at": None
         },
@@ -709,25 +811,66 @@ async def mark_messages_read(partner_id: str, user: User = Depends(get_current_u
     )
     return {"message": "Messages marked as read", "updated_count": result.modified_count}
 
-@api_router.get("/messages/{partner_id}")
-async def get_messages(partner_id: str, user: User = Depends(get_current_user)):
-    """Get messages with a specific user"""
+async def cleanup_expired_messages(trade_id: str):
+    """Delete messages that have expired (24 hours after trade completion)"""
+    trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    if not trade or not trade.get("is_completed"):
+        return
+    
+    # Delete expired messages
+    now = datetime.now(timezone.utc)
+    result = await db.messages.delete_many({
+        "trade_id": trade_id,
+        "expires_at": {"$lt": now.isoformat()}
+    })
+    return result.deleted_count
+
+@api_router.get("/messages/{trade_id}")
+async def get_messages(trade_id: str, user: User = Depends(get_current_user)):
+    """Get messages for a specific trade"""
+    # Verify user is part of the trade
+    trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    # Migrate if needed
+    trade = await migrate_trade_to_array_format(trade)
+    
+    if trade["owner_id"] != user.user_id and trade["trader_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Cleanup expired messages
+    await cleanup_expired_messages(trade_id)
+    
+    # Get messages for this trade
     messages = await db.messages.find({
-        "$or": [
-            {"sender_id": user.user_id, "receiver_id": partner_id},
-            {"sender_id": partner_id, "receiver_id": user.user_id}
-        ]
+        "trade_id": trade_id
     }, {"_id": 0}).sort("created_at", 1).to_list(100)
     
     return messages
 
 @api_router.post("/messages")
 async def send_message(msg: MessageCreate, user: User = Depends(get_current_user)):
-    """Send a message to another user"""
+    """Send a message in a trade"""
+    # Verify user is part of the trade
+    trade = await db.trades.find_one({"trade_id": msg.trade_id}, {"_id": 0})
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    # Migrate if needed
+    trade = await migrate_trade_to_array_format(trade)
+    
+    if trade["owner_id"] != user.user_id and trade["trader_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Determine receiver (the other party)
+    receiver_id = trade["trader_id"] if trade["owner_id"] == user.user_id else trade["owner_id"]
+    
     message = Message(
+        trade_id=msg.trade_id,
         sender_id=user.user_id,
-        receiver_id=msg.receiver_id,
-        item_id=msg.item_id,
+        receiver_id=receiver_id,
+        message_type="text",
         content=msg.content,
         read_at=None
     )
@@ -745,7 +888,7 @@ async def send_message(msg: MessageCreate, user: User = Depends(get_current_user
         "message": msg_dict
     }
     # Send to sender and receiver if they're connected
-    for user_id in [user.user_id, msg.receiver_id]:
+    for user_id in [user.user_id, receiver_id]:
         if user_id in active_connections:
             try:
                 await active_connections[user_id].send_text(json.dumps(broadcast_data))
@@ -874,40 +1017,64 @@ async def websocket_notifications(websocket: WebSocket):
 
 @api_router.post("/trades")
 async def create_trade(trade_data: TradeCreate, user: User = Depends(get_current_user)):
-    """Initiate a trade for an item"""
-    # Check if item exists and is available
-    item = await db.items.find_one({"item_id": trade_data.item_id, "is_available": True}, {"_id": 0})
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found or not available")
+    """Initiate a trade with multiple items"""
+    # Validate arrays are not empty
+    if not trade_data.owner_item_ids or not trade_data.trader_item_ids:
+        raise HTTPException(status_code=400, detail="Both owner and trader must have at least one item")
+    
+    # Validate max items per side
+    max_items = 5
+    if len(trade_data.owner_item_ids) > max_items or len(trade_data.trader_item_ids) > max_items:
+        raise HTTPException(status_code=400, detail=f"Maximum {max_items} items per side allowed")
+    
+    # Validate all owner items exist and are available
+    owner_items = []
+    for item_id in trade_data.owner_item_ids:
+        item = await db.items.find_one({"item_id": item_id, "is_available": True}, {"_id": 0})
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Item {item_id} not found or not available")
+        owner_items.append(item)
+    
+    # Validate all trader items exist, are available, and belong to trader
+    trader_items = []
+    for item_id in trade_data.trader_item_ids:
+        item = await db.items.find_one({"item_id": item_id, "is_available": True}, {"_id": 0})
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Item {item_id} not found or not available")
+        if item["user_id"] != user.user_id:
+            raise HTTPException(status_code=403, detail=f"You can only trade with your own items")
+        trader_items.append(item)
+    
+    # Get owner_id from first owner item
+    owner_id = owner_items[0]["user_id"]
     
     # Can't trade with yourself
-    if item["user_id"] == user.user_id:
+    if owner_id == user.user_id:
         raise HTTPException(status_code=400, detail="Cannot trade with yourself")
     
-    # Validate trader's item exists and belongs to trader
-    trader_item = await db.items.find_one({"item_id": trade_data.trader_item_id, "is_available": True}, {"_id": 0})
-    if not trader_item:
-        raise HTTPException(status_code=404, detail="Your item not found or not available")
+    # Check if all items belong to the same owner
+    for item in owner_items:
+        if item["user_id"] != owner_id:
+            raise HTTPException(status_code=400, detail="All owner items must belong to the same user")
     
-    if trader_item["user_id"] != user.user_id:
-        raise HTTPException(status_code=403, detail="You can only trade with your own items")
-    
-    # Check if trade already exists
+    # Check if trade already exists (same items, same users)
     existing_trade = await db.trades.find_one({
-        "item_id": trade_data.item_id,
-        "trader_item_id": trade_data.trader_item_id,
+        "owner_item_ids": {"$all": trade_data.owner_item_ids, "$size": len(trade_data.owner_item_ids)},
+        "trader_item_ids": {"$all": trade_data.trader_item_ids, "$size": len(trade_data.trader_item_ids)},
+        "owner_id": owner_id,
         "trader_id": user.user_id,
         "is_completed": False,
         "is_cancelled": False
     }, {"_id": 0})
     
     if existing_trade:
+        existing_trade = await migrate_trade_to_array_format(existing_trade)
         return existing_trade
     
     trade = Trade(
-        item_id=trade_data.item_id,
-        trader_item_id=trade_data.trader_item_id,
-        owner_id=item["user_id"],
+        owner_item_ids=trade_data.owner_item_ids,
+        trader_item_ids=trade_data.trader_item_ids,
+        owner_id=owner_id,
         trader_id=user.user_id
     )
     
@@ -922,15 +1089,64 @@ async def create_trade(trade_data: TradeCreate, user: User = Depends(get_current
     trader_user = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
     trader_name = trader_user.get("username") or trader_user.get("name", "Someone") if trader_user else "Someone"
     
-    notification_message = f"{trader_name} initiated a trade with you for \"{item['title']}\""
+    item_titles = ", ".join([item["title"] for item in owner_items[:2]])
+    if len(owner_items) > 2:
+        item_titles += f" and {len(owner_items) - 2} more"
+    
+    notification_message = f"{trader_name} initiated a trade with you for {item_titles}"
     await create_and_send_notification(
-        user_id=item["user_id"],
+        user_id=owner_id,
         notification_type="trade_initiated",
         message=notification_message,
-        data={"trade_id": trade_dict["trade_id"], "item_id": trade_data.item_id}
+        data={"trade_id": trade_dict["trade_id"]}
     )
     
     return trade_dict
+
+async def migrate_trade_to_array_format(trade: dict) -> dict:
+    """Migrate old trade format (item_id, trader_item_id) to new format (arrays)"""
+    if "owner_item_ids" in trade and "trader_item_ids" in trade:
+        return trade  # Already migrated
+    
+    # Migrate old format
+    owner_item_ids = []
+    trader_item_ids = []
+    
+    if trade.get("item_id"):
+        owner_item_ids = [trade["item_id"]]
+    if trade.get("trader_item_id"):
+        trader_item_ids = [trade["trader_item_id"]]
+    
+    # Update the trade in database
+    await db.trades.update_one(
+        {"trade_id": trade["trade_id"]},
+        {
+            "$set": {
+                "owner_item_ids": owner_item_ids,
+                "trader_item_ids": trader_item_ids,
+                "pending_owner_items": [],
+                "pending_trader_items": [],
+                "max_items_per_side": 5
+            },
+            "$unset": {
+                "item_id": "",
+                "trader_item_id": ""
+            }
+        }
+    )
+    
+    # Return updated trade
+    trade["owner_item_ids"] = owner_item_ids
+    trade["trader_item_ids"] = trader_item_ids
+    trade["pending_owner_items"] = []
+    trade["pending_trader_items"] = []
+    trade["max_items_per_side"] = 5
+    if "item_id" in trade:
+        del trade["item_id"]
+    if "trader_item_id" in trade:
+        del trade["trader_item_id"]
+    
+    return trade
 
 @api_router.get("/trades")
 async def get_my_trades(user: User = Depends(get_current_user)):
@@ -939,40 +1155,92 @@ async def get_my_trades(user: User = Depends(get_current_user)):
         "$or": [{"owner_id": user.user_id}, {"trader_id": user.user_id}]
     }, {"_id": 0}).sort("created_at", -1).to_list(50)
     
-    # Enrich with item and user data
-    result = []
+    # Collect all item IDs and user IDs for bulk fetching
+    all_item_ids = set()
+    user_ids = set()
+    migrated_trades = []
+    
     for trade in trades:
-        item = await db.items.find_one({"item_id": trade["item_id"]}, {"_id": 0})
-        trader_item = await db.items.find_one({"item_id": trade.get("trader_item_id")}, {"_id": 0}) if trade.get("trader_item_id") else None
-        owner = await db.users.find_one({"user_id": trade["owner_id"]}, {"_id": 0})
-        trader = await db.users.find_one({"user_id": trade["trader_id"]}, {"_id": 0})
+        # Migrate if needed
+        trade = await migrate_trade_to_array_format(trade)
+        migrated_trades.append(trade)
+        
+        # Collect item IDs
+        for item_id in trade.get("owner_item_ids", []):
+            all_item_ids.add(item_id)
+        for item_id in trade.get("trader_item_ids", []):
+            all_item_ids.add(item_id)
+        
+        # Collect user IDs
+        user_ids.add(trade["owner_id"])
+        user_ids.add(trade["trader_id"])
+    
+    # Bulk fetch all items
+    items_dict = {}
+    if all_item_ids:
+        items_cursor = db.items.find({"item_id": {"$in": list(all_item_ids)}}, {"_id": 0})
+        async for item in items_cursor:
+            items_dict[item["item_id"]] = item
+    
+    # Bulk fetch all users
+    users_dict = {}
+    if user_ids:
+        users_cursor = db.users.find({"user_id": {"$in": list(user_ids)}}, {"_id": 0})
+        async for user_doc in users_cursor:
+            users_dict[user_doc["user_id"]] = user_doc
+    
+    # Build result
+    result = []
+    for trade in migrated_trades:
+        owner_items = [items_dict[item_id] for item_id in trade.get("owner_item_ids", []) if item_id in items_dict]
+        trader_items = [items_dict[item_id] for item_id in trade.get("trader_item_ids", []) if item_id in items_dict]
+        
         result.append({
             "trade": trade,
-            "item": item,
-            "trader_item": trader_item,
-            "owner": owner,
-            "trader": trader
+            "owner_items": owner_items,
+            "trader_items": trader_items,
+            "owner": users_dict.get(trade["owner_id"]),
+            "trader": users_dict.get(trade["trader_id"])
         })
     
     return result
 
 @api_router.get("/trades/{trade_id}")
 async def get_trade(trade_id: str, user: User = Depends(get_current_user)):
-    """Get trade details"""
+    """Get a specific trade with all items"""
     trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
     
-    # Only participants can view
+    # Check authorization
     if trade["owner_id"] != user.user_id and trade["trader_id"] != user.user_id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
-    item = await db.items.find_one({"item_id": trade["item_id"]}, {"_id": 0})
-    trader_item = await db.items.find_one({"item_id": trade.get("trader_item_id")}, {"_id": 0}) if trade.get("trader_item_id") else None
+    # Migrate if needed
+    trade = await migrate_trade_to_array_format(trade)
+    
+    # Get all items
+    owner_items = []
+    trader_items = []
+    for item_id in trade.get("owner_item_ids", []):
+        item = await db.items.find_one({"item_id": item_id}, {"_id": 0})
+        if item:
+            owner_items.append(item)
+    for item_id in trade.get("trader_item_ids", []):
+        item = await db.items.find_one({"item_id": item_id}, {"_id": 0})
+        if item:
+            trader_items.append(item)
+    
     owner = await db.users.find_one({"user_id": trade["owner_id"]}, {"_id": 0})
     trader = await db.users.find_one({"user_id": trade["trader_id"]}, {"_id": 0})
     
-    return {"trade": trade, "item": item, "trader_item": trader_item, "owner": owner, "trader": trader}
+    return {
+        "trade": trade,
+        "owner_items": owner_items,
+        "trader_items": trader_items,
+        "owner": owner,
+        "trader": trader
+    }
 
 @api_router.delete("/trades/{trade_id}")
 async def cancel_trade(trade_id: str, user: User = Depends(get_current_user)):
@@ -980,6 +1248,9 @@ async def cancel_trade(trade_id: str, user: User = Depends(get_current_user)):
     trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
+    
+    # Migrate if needed
+    trade = await migrate_trade_to_array_format(trade)
     
     # Only participants can cancel
     if trade["owner_id"] != user.user_id and trade["trader_id"] != user.user_id:
@@ -1011,6 +1282,9 @@ async def confirm_trade(trade_id: str, user: User = Depends(get_current_user)):
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
     
+    # Migrate if needed
+    trade = await migrate_trade_to_array_format(trade)
+    
     if trade["is_completed"]:
         raise HTTPException(status_code=400, detail="Trade already completed")
     
@@ -1034,30 +1308,412 @@ async def confirm_trade(trade_id: str, user: User = Depends(get_current_user)):
     
     # Check if both confirmed
     updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    updated_trade = await migrate_trade_to_array_format(updated_trade)
     
     if updated_trade["owner_confirmed"] and updated_trade["trader_confirmed"]:
         # Complete the trade
+        completed_at = datetime.now(timezone.utc)
         await db.trades.update_one(
             {"trade_id": trade_id},
             {"$set": {
                 "is_completed": True,
-                "completed_at": datetime.now(timezone.utc).isoformat()
+                "completed_at": completed_at.isoformat()
             }}
         )
         
-        # Mark item as unavailable
-        await db.items.update_one(
-            {"item_id": trade["item_id"]},
-            {"$set": {"is_available": False}}
-        )
+        # Mark all items as unavailable
+        all_item_ids = updated_trade.get("owner_item_ids", []) + updated_trade.get("trader_item_ids", [])
+        for item_id in all_item_ids:
+            await db.items.update_one(
+                {"item_id": item_id},
+                {"$set": {"is_available": False}}
+            )
         
         # Award trade points to both users
         await db.users.update_one({"user_id": trade["owner_id"]}, {"$inc": {"trade_points": 1}})
         await db.users.update_one({"user_id": trade["trader_id"]}, {"$inc": {"trade_points": 1}})
         
+        # Set expiration for all messages in this trade (24 hours from completion)
+        expires_at = completed_at + timedelta(hours=24)
+        await db.messages.update_many(
+            {"trade_id": trade_id},
+            {"$set": {"expires_at": expires_at.isoformat()}}
+        )
+        
         updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+        updated_trade = await migrate_trade_to_array_format(updated_trade)
     
     return updated_trade
+
+@api_router.post("/trades/{trade_id}/items")
+async def add_items_to_trade(trade_id: str, item_data: dict, user: User = Depends(get_current_user)):
+    """Add item(s) to trade. Requires confirmation if adding to other party's side."""
+    trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    # Migrate if needed
+    trade = await migrate_trade_to_array_format(trade)
+    
+    # Check authorization
+    if trade["owner_id"] != user.user_id and trade["trader_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    if trade["is_completed"] or trade.get("is_cancelled", False):
+        raise HTTPException(status_code=400, detail="Cannot modify completed or cancelled trade")
+    
+    item_ids = item_data.get("item_ids", [])
+    side = item_data.get("side", "trader")  # "owner" or "trader"
+    
+    if not item_ids:
+        raise HTTPException(status_code=400, detail="No items provided")
+    
+    # Determine which side the user is on
+    is_owner = trade["owner_id"] == user.user_id
+    is_trader = trade["trader_id"] == user.user_id
+    
+    # Validate items
+    for item_id in item_ids:
+        item = await db.items.find_one({"item_id": item_id, "is_available": True}, {"_id": 0})
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Item {item_id} not found or not available")
+        
+        # Check if user owns the item (if adding to their own side)
+        if side == "owner" and is_owner:
+            if item["user_id"] != user.user_id:
+                raise HTTPException(status_code=403, detail=f"You can only add your own items")
+        elif side == "trader" and is_trader:
+            if item["user_id"] != user.user_id:
+                raise HTTPException(status_code=403, detail=f"You can only add your own items")
+    
+    # Check max items per side
+    max_items = trade.get("max_items_per_side", 5)
+    current_items = len(trade.get(f"{side}_item_ids", []))
+    if current_items + len(item_ids) > max_items:
+        raise HTTPException(status_code=400, detail=f"Maximum {max_items} items per side allowed")
+    
+    # If adding to other party's side, require confirmation
+    if (side == "owner" and is_trader) or (side == "trader" and is_owner):
+        # Add to pending items
+        await db.trades.update_one(
+            {"trade_id": trade_id},
+            {"$push": {f"pending_{side}_items": {"$each": item_ids}}}
+        )
+        
+        # Create notification
+        other_user_id = trade["owner_id"] if side == "trader" else trade["trader_id"]
+        requester_name = user.get("username") or user.get("name", "Someone")
+        await create_and_send_notification(
+            user_id=other_user_id,
+            notification_type="item_add_request",
+            message=f"{requester_name} wants to add items to the trade",
+            data={"trade_id": trade_id, "item_ids": item_ids, "side": side}
+        )
+        
+        updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+        updated_trade = await migrate_trade_to_array_format(updated_trade)
+        
+        # Broadcast trade update via WebSocket
+        other_user_id = trade["owner_id"] if side == "trader" else trade["trader_id"]
+        broadcast_data = {
+            "type": "trade_updated",
+            "trade_id": trade_id
+        }
+        for user_id in [user.user_id, other_user_id]:
+            if user_id in active_connections:
+                try:
+                    await active_connections[user_id].send_text(json.dumps(broadcast_data))
+                except Exception:
+                    active_connections.pop(user_id, None)
+        
+        return updated_trade
+    else:
+        # Add directly to trade (own side)
+        await db.trades.update_one(
+            {"trade_id": trade_id},
+            {"$push": {f"{side}_item_ids": {"$each": item_ids}}}
+        )
+        
+        updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+        updated_trade = await migrate_trade_to_array_format(updated_trade)
+        
+        # Broadcast trade update via WebSocket
+        other_user_id = trade["owner_id"] if side == "trader" else trade["trader_id"]
+        broadcast_data = {
+            "type": "trade_updated",
+            "trade_id": trade_id
+        }
+        for user_id in [user.user_id, other_user_id]:
+            if user_id in active_connections:
+                try:
+                    await active_connections[user_id].send_text(json.dumps(broadcast_data))
+                except Exception:
+                    active_connections.pop(user_id, None)
+        
+        return updated_trade
+
+@api_router.delete("/trades/{trade_id}/items/{item_id}")
+async def remove_item_from_trade(trade_id: str, item_id: str, user: User = Depends(get_current_user)):
+    """Remove item from trade. Requires confirmation if removing from other party's side."""
+    trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    # Migrate if needed
+    trade = await migrate_trade_to_array_format(trade)
+    
+    # Check authorization
+    if trade["owner_id"] != user.user_id and trade["trader_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    if trade["is_completed"] or trade.get("is_cancelled", False):
+        raise HTTPException(status_code=400, detail="Cannot modify completed or cancelled trade")
+    
+    # Determine which side the item is on
+    is_owner = trade["owner_id"] == user.user_id
+    is_trader = trade["trader_id"] == user.user_id
+    side = None
+    
+    if item_id in trade.get("owner_item_ids", []):
+        side = "owner"
+    elif item_id in trade.get("trader_item_ids", []):
+        side = "trader"
+    else:
+        raise HTTPException(status_code=404, detail="Item not found in trade")
+    
+    # If removing from other party's side, require confirmation
+    if (side == "owner" and is_trader) or (side == "trader" and is_owner):
+        raise HTTPException(status_code=403, detail="Cannot remove items from other party's side. Request removal instead.")
+    
+    # Remove from trade
+    await db.trades.update_one(
+        {"trade_id": trade_id},
+        {"$pull": {f"{side}_item_ids": item_id}}
+    )
+    
+    # Also remove from pending if it's there
+    await db.trades.update_one(
+        {"trade_id": trade_id},
+        {"$pull": {f"pending_{side}_items": item_id}}
+    )
+    
+    updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    updated_trade = await migrate_trade_to_array_format(updated_trade)
+    
+    # Broadcast trade update via WebSocket
+    other_user_id = trade["owner_id"] if side == "trader" else trade["trader_id"]
+    broadcast_data = {
+        "type": "trade_updated",
+        "trade_id": trade_id
+    }
+    for user_id in [user.user_id, other_user_id]:
+        if user_id in active_connections:
+            try:
+                await active_connections[user_id].send_text(json.dumps(broadcast_data))
+            except Exception:
+                active_connections.pop(user_id, None)
+    
+    return updated_trade
+
+@api_router.post("/trades/{trade_id}/items/request")
+async def request_item_in_trade(trade_id: str, request_data: dict, user: User = Depends(get_current_user)):
+    """Request other party to add an item to the trade"""
+    trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    # Migrate if needed
+    trade = await migrate_trade_to_array_format(trade)
+    
+    # Check authorization
+    if trade["owner_id"] != user.user_id and trade["trader_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    if trade["is_completed"] or trade.get("is_cancelled", False):
+        raise HTTPException(status_code=400, detail="Cannot modify completed or cancelled trade")
+    
+    item_id = request_data.get("item_id")
+    side = request_data.get("side")  # "owner" or "trader" - which side should add the item
+    
+    if not item_id or not side:
+        raise HTTPException(status_code=400, detail="item_id and side are required")
+    
+    # Validate item exists
+    item = await db.items.find_one({"item_id": item_id, "is_available": True}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found or not available")
+    
+    # Determine which side the user is on
+    is_owner = trade["owner_id"] == user.user_id
+    is_trader = trade["trader_id"] == user.user_id
+    
+    # Can only request items for the other party's side
+    if (side == "owner" and is_owner) or (side == "trader" and is_trader):
+        raise HTTPException(status_code=400, detail="Cannot request items for your own side")
+    
+    # Check if item belongs to the other party
+    other_user_id = trade["owner_id"] if side == "owner" else trade["trader_id"]
+    if item["user_id"] != other_user_id:
+        raise HTTPException(status_code=400, detail="Item must belong to the other party")
+    
+    # Check max items per side
+    max_items = trade.get("max_items_per_side", 5)
+    current_items = len(trade.get(f"{side}_item_ids", []))
+    if current_items >= max_items:
+        raise HTTPException(status_code=400, detail=f"Maximum {max_items} items per side allowed")
+    
+    # Create request message
+    request_id = f"req_{uuid.uuid4().hex[:12]}"
+    message = Message(
+        trade_id=trade_id,
+        sender_id=user.user_id,
+        receiver_id=other_user_id,
+        message_type="item_request",
+        item_request_data={
+            "item_id": item_id,
+            "side": side,
+            "status": "pending",
+            "request_id": request_id
+        },
+        content=f"Request to add item: {item.get('title', item_id)}"
+    )
+    
+    msg_dict = message.model_dump()
+    msg_dict["created_at"] = msg_dict["created_at"].isoformat()
+    
+    await db.messages.insert_one(msg_dict.copy())
+    
+    # Broadcast via WebSocket
+    broadcast_data = {
+        "type": "new_message",
+        "message": msg_dict
+    }
+    for user_id in [user.user_id, other_user_id]:
+        if user_id in active_connections:
+            try:
+                await active_connections[user_id].send_text(json.dumps(broadcast_data))
+            except Exception:
+                active_connections.pop(user_id, None)
+    
+    # Create notification
+    requester_name = user.get("username") or user.get("name", "Someone")
+    await create_and_send_notification(
+        user_id=other_user_id,
+        notification_type="item_request",
+        message=f"{requester_name} requested to add an item to the trade",
+        data={"trade_id": trade_id, "item_id": item_id, "request_id": request_id}
+    )
+    
+    return {"message": "Item request sent", "request_id": request_id}
+
+@api_router.post("/trades/{trade_id}/items/request/{request_id}/respond")
+async def respond_to_item_request(trade_id: str, request_id: str, response_data: dict, user: User = Depends(get_current_user)):
+    """Accept or decline an item request"""
+    trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    # Migrate if needed
+    trade = await migrate_trade_to_array_format(trade)
+    
+    # Check authorization
+    if trade["owner_id"] != user.user_id and trade["trader_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    if trade["is_completed"] or trade.get("is_cancelled", False):
+        raise HTTPException(status_code=400, detail="Cannot modify completed or cancelled trade")
+    
+    # Find the request message
+    request_message = await db.messages.find_one({
+        "trade_id": trade_id,
+        "message_type": "item_request",
+        "item_request_data.request_id": request_id,
+        "item_request_data.status": "pending"
+    }, {"_id": 0})
+    
+    if not request_message:
+        raise HTTPException(status_code=404, detail="Request not found or already processed")
+    
+    # Check if user is the receiver (the one being requested)
+    if request_message["receiver_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to respond to this request")
+    
+    accepted = response_data.get("accepted", False)
+    item_request_data = request_message.get("item_request_data", {})
+    item_id = item_request_data.get("item_id")
+    side = item_request_data.get("side")
+    
+    # Update request message status
+    await db.messages.update_one(
+        {"message_id": request_message["message_id"]},
+        {"$set": {
+            "item_request_data.status": "accepted" if accepted else "declined"
+        }}
+    )
+    
+    if accepted:
+        # Add item to trade
+        await db.trades.update_one(
+            {"trade_id": trade_id},
+            {"$push": {f"{side}_item_ids": item_id}}
+        )
+        
+        # Remove from pending if it's there
+        await db.trades.update_one(
+            {"trade_id": trade_id},
+            {"$pull": {f"pending_{side}_items": item_id}}
+        )
+        
+        # Create confirmation message
+        message = Message(
+            trade_id=trade_id,
+            sender_id=user.user_id,
+            receiver_id=request_message["sender_id"],
+            message_type="item_added",
+            content=f"Accepted request to add item"
+        )
+        msg_dict = message.model_dump()
+        msg_dict["created_at"] = msg_dict["created_at"].isoformat()
+        await db.messages.insert_one(msg_dict.copy())
+        
+        # Broadcast
+        broadcast_data = {
+            "type": "new_message",
+            "message": msg_dict
+        }
+        for user_id in [user.user_id, request_message["sender_id"]]:
+            if user_id in active_connections:
+                try:
+                    await active_connections[user_id].send_text(json.dumps(broadcast_data))
+                except Exception:
+                    active_connections.pop(user_id, None)
+    else:
+        # Create decline message
+        message = Message(
+            trade_id=trade_id,
+            sender_id=user.user_id,
+            receiver_id=request_message["sender_id"],
+            message_type="text",
+            content=f"Declined request to add item"
+        )
+        msg_dict = message.model_dump()
+        msg_dict["created_at"] = msg_dict["created_at"].isoformat()
+        await db.messages.insert_one(msg_dict.copy())
+        
+        # Broadcast
+        broadcast_data = {
+            "type": "new_message",
+            "message": msg_dict
+        }
+        for user_id in [user.user_id, request_message["sender_id"]]:
+            if user_id in active_connections:
+                try:
+                    await active_connections[user_id].send_text(json.dumps(broadcast_data))
+                except Exception:
+                    active_connections.pop(user_id, None)
+    
+    updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
+    return await migrate_trade_to_array_format(updated_trade)
 
 @api_router.post("/trades/{trade_id}/rate")
 async def rate_trade(trade_id: str, rating_data: RatingCreate, user: User = Depends(get_current_user)):
@@ -1181,11 +1837,13 @@ async def admin_delete_item(item_id: str, admin: User = Depends(get_admin_user))
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     
-    # Find all active trades involving this item
+    # Find all active trades involving this item (check both old and new format)
     active_trades = await db.trades.find({
         "$or": [
             {"item_id": item_id, "is_completed": False, "is_cancelled": False},
-            {"trader_item_id": item_id, "is_completed": False, "is_cancelled": False}
+            {"trader_item_id": item_id, "is_completed": False, "is_cancelled": False},
+            {"owner_item_ids": item_id, "is_completed": False, "is_cancelled": False},
+            {"trader_item_ids": item_id, "is_completed": False, "is_cancelled": False}
         ]
     }, {"_id": 0}).to_list(100)
     
@@ -1318,17 +1976,52 @@ async def admin_get_trades(admin: User = Depends(get_admin_user)):
     """Get all trades (admin only)"""
     trades = await db.trades.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
     
-    # Enrich with item and user data
-    result = []
+    # Collect all item IDs and user IDs for bulk fetching
+    all_item_ids = set()
+    user_ids = set()
+    migrated_trades = []
+    
     for trade in trades:
-        item = await db.items.find_one({"item_id": trade["item_id"]}, {"_id": 0})
-        owner = await db.users.find_one({"user_id": trade["owner_id"]}, {"_id": 0})
-        trader = await db.users.find_one({"user_id": trade["trader_id"]}, {"_id": 0})
+        # Migrate if needed
+        trade = await migrate_trade_to_array_format(trade)
+        migrated_trades.append(trade)
+        
+        # Collect item IDs
+        for item_id in trade.get("owner_item_ids", []):
+            all_item_ids.add(item_id)
+        for item_id in trade.get("trader_item_ids", []):
+            all_item_ids.add(item_id)
+        
+        # Collect user IDs
+        user_ids.add(trade["owner_id"])
+        user_ids.add(trade["trader_id"])
+    
+    # Bulk fetch all items
+    items_dict = {}
+    if all_item_ids:
+        items_cursor = db.items.find({"item_id": {"$in": list(all_item_ids)}}, {"_id": 0})
+        async for item in items_cursor:
+            items_dict[item["item_id"]] = item
+    
+    # Bulk fetch all users
+    users_dict = {}
+    if user_ids:
+        users_cursor = db.users.find({"user_id": {"$in": list(user_ids)}}, {"_id": 0})
+        async for user_doc in users_cursor:
+            users_dict[user_doc["user_id"]] = user_doc
+    
+    # Build result
+    result = []
+    for trade in migrated_trades:
+        owner_items = [items_dict[item_id] for item_id in trade.get("owner_item_ids", []) if item_id in items_dict]
+        trader_items = [items_dict[item_id] for item_id in trade.get("trader_item_ids", []) if item_id in items_dict]
+        
         result.append({
             "trade": trade,
-            "item": item,
-            "owner": owner,
-            "trader": trader
+            "owner_items": owner_items,
+            "trader_items": trader_items,
+            "owner": users_dict.get(trade["owner_id"]),
+            "trader": users_dict.get(trade["trader_id"])
         })
     
     return result

@@ -40,6 +40,12 @@ const Landing = () => {
       const idToken = params.get('id_token');
       if (idToken) {
         console.log('Found ID token in URL, processing...');
+        // Check if there's a pending item ID in localStorage (set before redirect)
+        const savedItemId = localStorage.getItem('pending_item_id');
+        if (savedItemId) {
+          setPendingItemId(savedItemId);
+          localStorage.removeItem('pending_item_id');
+        }
         handleGoogleSignIn({ credential: idToken });
         // Clear the hash
         window.history.replaceState(null, '', window.location.pathname);
@@ -105,12 +111,15 @@ const Landing = () => {
       }
     };
 
-    // Fetch featured items for preview
+    // Fetch featured items for preview (top 4 by views)
     const fetchItems = async () => {
       if (!API) return;
       try {
-        const response = await axios.get(`${API}/items`, { timeout: 10000 });
-        setFeaturedItems(response.data.slice(0, 6));
+        const response = await axios.get(`${API}/items`, { 
+          params: { sort_by_views: true, limit: 4 },
+          timeout: 10000 
+        });
+        setFeaturedItems(response.data || []);
       } catch {
         // Ignore errors
       }
@@ -144,9 +153,21 @@ const Landing = () => {
           localStorage.setItem('session_token', authResponse.data.session_token);
         }
         
+        // Check for pending item ID in state or localStorage
+        const itemId = pendingItemId || localStorage.getItem('pending_item_id');
+        if (itemId) {
+          localStorage.removeItem('pending_item_id');
+          setPendingItemId(null);
+        }
+        
         // Small delay to ensure cookie is set
         setTimeout(() => {
-          navigate("/dashboard", { replace: true });
+          // If there's a pending item ID, navigate to it, otherwise go to dashboard
+          if (itemId) {
+            navigate(`/item/${itemId}`, { replace: true });
+          } else {
+            navigate("/dashboard", { replace: true });
+          }
         }, 500);
       } else {
         console.error('No user data in auth response');
@@ -164,6 +185,30 @@ const Landing = () => {
       } else {
         alert(`Network error: ${error.message}. Please check your connection and try again.`);
       }
+    }
+  };
+
+  const handleItemClick = async (itemId) => {
+    // Check if user is authenticated
+    try {
+      const response = await axios.get(`${API}/auth/me`, { 
+        withCredentials: true,
+        timeout: 5000
+      });
+      if (response.data) {
+        // User is authenticated, navigate to item
+        navigate(`/item/${itemId}`);
+      } else {
+        // Not authenticated, save item ID and trigger OAuth
+        localStorage.setItem('pending_item_id', itemId);
+        setPendingItemId(itemId);
+        handleGoogleLogin();
+      }
+    } catch {
+      // Not authenticated, save item ID and trigger OAuth
+      localStorage.setItem('pending_item_id', itemId);
+      setPendingItemId(itemId);
+      handleGoogleLogin();
     }
   };
 
@@ -372,13 +417,14 @@ const Landing = () => {
               className="text-3xl font-semibold text-slate-900 text-center mb-12"
               style={{ fontFamily: 'Manrope, sans-serif' }}
             >
-              What People Are Trading
+              See What People Are Trading
             </h2>
             <div className="masonry-grid">
               {featuredItems.map((item) => (
                 <div
                   key={item.item_id}
-                  className="masonry-item rounded-2xl overflow-hidden bg-white border border-slate-100 shadow-sm"
+                  onClick={() => handleItemClick(item.item_id)}
+                  className="masonry-item rounded-2xl overflow-hidden bg-white border border-slate-100 shadow-sm cursor-pointer hover:shadow-md transition-shadow duration-200"
                 >
                   <img
                     src={item.image}

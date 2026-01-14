@@ -2,6 +2,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { useAuth } from "@/App";
+import { usePreloadCache } from "@/contexts/PreloadContext";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -16,6 +17,7 @@ import { ArrowLeftRight, Plus, MessageCircle, User, LogOut, Package, Shield, Bel
 
 export const Header = () => {
   const { user, logout, API, getAuthHeaders } = useAuth();
+  const { getCachedUnreadCount, getCachedNotifications } = usePreloadCache();
   const navigate = useNavigate();
   const location = useLocation();
   const [unreadCount, setUnreadCount] = useState(0);
@@ -30,6 +32,14 @@ export const Header = () => {
 
   const fetchUnreadCount = useCallback(async () => {
     if (!user) return;
+    
+    // Check cache first
+    const cached = getCachedUnreadCount();
+    if (cached !== null) {
+      setUnreadCount(cached);
+      // Still fetch in background to update
+    }
+
     try {
       const headers = getAuthHeaders();
       const response = await axios.get(`${API}/messages/unread-count`, {
@@ -40,13 +50,18 @@ export const Header = () => {
     } catch (error) {
       console.error("Failed to fetch unread count:", error);
     }
-  }, [user, API]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [user, API, getCachedUnreadCount]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   useEffect(() => {
     fetchUnreadCount();
-    // Poll for unread count every 10 seconds
-    const interval = setInterval(fetchUnreadCount, 10000);
-    return () => clearInterval(interval);
+    // Listen for message read events to update count (no polling needed - WebSocket handles real-time)
+    const handleMessagesRead = () => {
+      fetchUnreadCount();
+    };
+    window.addEventListener('messagesRead', handleMessagesRead);
+    return () => {
+      window.removeEventListener('messagesRead', handleMessagesRead);
+    };
   }, [fetchUnreadCount]);
 
   // Refresh unread count when navigating to/from messages
@@ -68,6 +83,15 @@ export const Header = () => {
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
     if (!user) return;
+    
+    // Check cache first
+    const cached = getCachedNotifications();
+    if (cached) {
+      setNotifications(cached);
+      setNotificationCount(cached.filter(n => !n.dismissed_at).length);
+      // Still fetch in background to update
+    }
+
     try {
       const headers = getAuthHeaders();
       const response = await axios.get(`${API}/notifications`, {
@@ -75,11 +99,11 @@ export const Header = () => {
         headers: headers
       });
       setNotifications(response.data);
-      setNotificationCount(response.data.length);
+      setNotificationCount(response.data.filter(n => !n.dismissed_at).length);
     } catch (error) {
       console.error("Failed to fetch notifications:", error);
     }
-  }, [user, API, getAuthHeaders]);
+  }, [user, API, getCachedNotifications]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   // WebSocket connection for notifications
   useEffect(() => {
@@ -211,7 +235,7 @@ export const Header = () => {
             >
               <MessageCircle className="w-5 h-5" />
               {unreadCount > 0 && (
-                <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full border-2 border-white flex items-center justify-center">
+                <div className="absolute -top-1 left-[calc(50%+8px)] w-5 h-5 bg-red-500 rounded-full border-2 border-white flex items-center justify-center">
                   <span className="text-xs text-white font-bold">
                     {unreadCount > 9 ? "9+" : unreadCount}
                   </span>

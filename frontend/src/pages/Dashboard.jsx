@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import { useAuth } from "@/App";
+import { usePreloadCache } from "@/contexts/PreloadContext";
 import { Header } from "@/components/Header";
 import { ItemCard } from "@/components/ItemCard";
 import { CategoryFilter } from "@/components/CategoryFilter";
@@ -9,6 +10,7 @@ import { Search, Loader2 } from "lucide-react";
 
 const Dashboard = () => {
   const { API } = useAuth();
+  const { getCachedItems, getCachedCategories } = usePreloadCache();
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -17,21 +19,33 @@ const Dashboard = () => {
   const [owners, setOwners] = useState({});
 
   const fetchItems = useCallback(async () => {
+    // Check cache first (only if no category filter)
+    if (!selectedCategory) {
+      const cached = getCachedItems();
+      if (cached) {
+        setItems(cached);
+        const ownerMap = {};
+        cached.forEach((item) => {
+          if (item.owner) {
+            ownerMap[item.owner.user_id] = item.owner;
+          }
+        });
+        setOwners(ownerMap);
+        setIsLoading(false);
+        // Still fetch in background to update
+      }
+    }
+
     try {
-      const params = selectedCategory ? { category: selectedCategory } : {};
+      const params = selectedCategory ? { category: selectedCategory, include_owners: true } : { include_owners: true };
       const response = await axios.get(`${API}/items`, { params, withCredentials: true });
       setItems(response.data);
 
-      // Fetch owner info for each item
-      const ownerIds = [...new Set(response.data.map((item) => item.user_id))];
-      const ownerPromises = ownerIds.map((id) =>
-        axios.get(`${API}/users/${id}`, { withCredentials: true }).catch(() => null)
-      );
-      const ownerResponses = await Promise.all(ownerPromises);
+      // Extract owners from items (already included in response)
       const ownerMap = {};
-      ownerResponses.forEach((res) => {
-        if (res?.data) {
-          ownerMap[res.data.user_id] = res.data;
+      response.data.forEach((item) => {
+        if (item.owner) {
+          ownerMap[item.owner.user_id] = item.owner;
         }
       });
       setOwners(ownerMap);
@@ -40,16 +54,26 @@ const Dashboard = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [API, selectedCategory]);
+  }, [API, selectedCategory, getCachedItems]);
 
   const fetchCategories = useCallback(async () => {
+    // Check cache first
+    const cached = getCachedCategories();
+    if (cached) {
+      const sorted = [...cached].sort((a, b) => a.name.localeCompare(b.name));
+      setCategories(sorted);
+      // Still fetch in background to update
+    }
+
     try {
       const response = await axios.get(`${API}/categories`, { withCredentials: true });
-      setCategories(response.data);
+      // Sort alphabetically for stable order (backend already does this, but ensure consistency)
+      const sorted = [...response.data].sort((a, b) => a.name.localeCompare(b.name));
+      setCategories(sorted);
     } catch (error) {
       console.error("Failed to fetch categories:", error);
     }
-  }, [API]);
+  }, [API, getCachedCategories]);
 
   useEffect(() => {
     fetchItems();

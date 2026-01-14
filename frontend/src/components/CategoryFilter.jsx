@@ -4,11 +4,11 @@ export const CategoryFilter = ({ categories, selectedCategory, onSelectCategory 
   return (
     <div className="w-full py-4" data-testid="category-filter">
       <ScrollArea className="w-full whitespace-nowrap">
-        <div className="flex gap-2 px-1">
+        <div className="flex gap-2 px-1 py-2 min-h-[44px] items-center">
           {/* All Category */}
           <button
             onClick={() => onSelectCategory(null)}
-            className={`category-pill px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+            className={`category-pill px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 flex-shrink-0 ${
               !selectedCategory
                 ? "bg-indigo-600 text-white shadow-lg"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -18,12 +18,12 @@ export const CategoryFilter = ({ categories, selectedCategory, onSelectCategory 
             All
           </button>
 
-          {/* Dynamic Categories - sorted by click_count */}
+          {/* Dynamic Categories - sorted alphabetically for stability */}
           {categories.map((category) => (
             <button
               key={category.name}
               onClick={() => onSelectCategory(category.name)}
-              className={`category-pill px-4 py-2 rounded-full text-sm font-medium capitalize transition-all duration-200 ${
+              className={`category-pill px-4 py-2 rounded-full text-sm font-medium capitalize transition-all duration-200 flex-shrink-0 ${
                 selectedCategory === category.name
                   ? "bg-indigo-600 text-white shadow-lg"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "@/App";
+import { usePreloadCache } from "@/contexts/PreloadContext";
 import { Header } from "@/components/Header";
 import { RatingModal } from "@/components/RatingModal";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -9,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Loader2, Check, MessageCircle, Star, X, ArrowLeftRight } from "lucide-react";
+import { Loader2, Check, MessageCircle, Star, X, ArrowLeftRight, Plus, Trash2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,10 +21,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const Trades = () => {
   const navigate = useNavigate();
   const { user, API, getAuthHeaders } = useAuth();
+  const { getCachedTrades } = usePreloadCache();
   const [trades, setTrades] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [confirmingId, setConfirmingId] = useState(null);
@@ -31,8 +39,20 @@ const Trades = () => {
   const [isRating, setIsRating] = useState(false);
   const [cancelDialog, setCancelDialog] = useState({ isOpen: false, tradeId: null });
   const [isCancelling, setIsCancelling] = useState(false);
+  const [addingItemTradeId, setAddingItemTradeId] = useState(null);
+  const [removingItemId, setRemovingItemId] = useState(null);
+  const [myAvailableItems, setMyAvailableItems] = useState([]);
+  const [deleteLastItemDialog, setDeleteLastItemDialog] = useState({ isOpen: false, tradeId: null, itemId: null });
 
   const fetchTrades = useCallback(async () => {
+    // Check cache first
+    const cached = getCachedTrades();
+    if (cached) {
+      setTrades(cached);
+      setIsLoading(false);
+      // Still fetch in background to update
+    }
+
     try {
       const headers = getAuthHeaders();
       const response = await axios.get(`${API}/trades`, { 
@@ -45,7 +65,7 @@ const Trades = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, getCachedTrades]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   useEffect(() => {
     fetchTrades();
@@ -130,13 +150,100 @@ const Trades = () => {
       .slice(0, 2);
   };
 
+  const fetchMyAvailableItems = useCallback(async (tradeId, currentItemIds) => {
+    try {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API}/my-items`, {
+        withCredentials: true,
+        headers: headers
+      });
+      const available = response.data.filter(item => item.is_available);
+      // Filter out items already in trade
+      setMyAvailableItems(available.filter(item => !currentItemIds.includes(item.item_id)));
+    } catch (error) {
+      console.error("Failed to fetch items:", error);
+    }
+  }, [API]);
+  
+  const handleAddItem = async (tradeId, itemId, side) => {
+    try {
+      const headers = getAuthHeaders();
+      await axios.post(
+        `${API}/trades/${tradeId}/items`,
+        { item_ids: [itemId], side },
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Item added to trade");
+      fetchTrades();
+      setAddingItemTradeId(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to add item");
+    }
+  };
+  
+  const handleRemoveItem = async (tradeId, itemId, isLastItem = false) => {
+    // If it's the last item, show confirmation dialog
+    if (isLastItem) {
+      setDeleteLastItemDialog({ isOpen: true, tradeId, itemId });
+      return;
+    }
+    
+    setRemovingItemId(itemId);
+    try {
+      const headers = getAuthHeaders();
+      await axios.delete(
+        `${API}/trades/${tradeId}/items/${itemId}`,
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Item removed from trade");
+      fetchTrades();
+      setRemovingItemId(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to remove item");
+      setRemovingItemId(null);
+    }
+  };
+
+  const handleConfirmDeleteLastItem = async () => {
+    const { tradeId, itemId } = deleteLastItemDialog;
+    if (!tradeId || !itemId) return;
+    
+    setRemovingItemId(itemId);
+    try {
+      const headers = getAuthHeaders();
+      // Remove the item (which will leave the trade with 0 items on that side, effectively canceling it)
+      await axios.delete(
+        `${API}/trades/${tradeId}/items/${itemId}`,
+        { withCredentials: true, headers: headers }
+      );
+      // Then cancel the trade since it has no items on one side
+      await axios.delete(
+        `${API}/trades/${tradeId}`,
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Item removed and trade cancelled");
+      fetchTrades();
+      setRemovingItemId(null);
+      setDeleteLastItemDialog({ isOpen: false, tradeId: null, itemId: null });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to remove item");
+      setRemovingItemId(null);
+    }
+  };
+
   const activeTrades = trades.filter((t) => !t.trade.is_completed && !t.trade.is_cancelled);
   const completedTrades = trades.filter((t) => t.trade.is_completed);
 
   const TradeCard = ({ tradeData }) => {
-    const { trade, item, trader_item, owner, trader } = tradeData;
+    const { trade, owner_items = [], trader_items = [], owner, trader } = tradeData;
+    // Backward compatibility: if old format exists, convert to arrays
+    const ownerItems = owner_items.length > 0 ? owner_items : (tradeData.item ? [tradeData.item] : []);
+    const traderItems = trader_items.length > 0 ? trader_items : (tradeData.trader_item ? [tradeData.trader_item] : []);
+    
     const isOwner = trade.owner_id === user.user_id;
     const otherUser = isOwner ? trader : owner;
+    const myItems = isOwner ? ownerItems : traderItems;
+    const theirItems = isOwner ? traderItems : ownerItems;
     const myConfirmed = isOwner ? trade.owner_confirmed : trade.trader_confirmed;
     const theirConfirmed = isOwner ? trade.trader_confirmed : trade.owner_confirmed;
     const canRate =
@@ -150,61 +257,82 @@ const Trades = () => {
         data-testid={`trade-card-${trade.trade_id}`}
       >
         <div className="flex gap-4">
-          {/* Items - Both items side by side */}
+          {/* Items - Display all items */}
           <div className="flex gap-3 flex-shrink-0">
-            {/* Item being traded for */}
-            <div
-              className="w-24 h-24 rounded-xl overflow-hidden cursor-pointer border-2 border-indigo-200"
-              onClick={() => navigate(`/item/${item?.item_id}`)}
-            >
-              <img
-                src={item?.image}
-                alt={item?.title}
-                className="w-full h-full object-cover"
-              />
+            {/* Their items */}
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-slate-500 text-center">{otherUser?.username || otherUser?.name}'s items</p>
+              <div className="flex flex-col gap-2">
+                {theirItems.map((item) => (
+                  <div
+                    key={item.item_id}
+                    className="w-20 h-20 rounded-xl overflow-hidden cursor-pointer border-2 border-indigo-200"
+                    onClick={() => navigate(`/item/${item.item_id}`)}
+                  >
+                    <img
+                      src={item.image}
+                      alt={item.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
             {/* Arrow */}
             <div className="flex items-center text-slate-400">
               <ArrowLeftRight className="w-5 h-5" />
             </div>
-            {/* Item being offered */}
-            {trader_item && (
-              <div
-                className="w-24 h-24 rounded-xl overflow-hidden cursor-pointer border-2 border-indigo-200"
-                onClick={() => navigate(`/item/${trader_item?.item_id}`)}
-              >
-                <img
-                  src={trader_item?.image}
-                  alt={trader_item?.title}
-                  className="w-full h-full object-cover"
-                />
+            {/* My items */}
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-slate-500 text-center">Your items</p>
+              <div className="flex flex-col gap-2">
+                {myItems.map((item) => (
+                  <div key={item.item_id} className="relative group">
+                    <div
+                      className="w-20 h-20 rounded-xl overflow-hidden cursor-pointer border-2 border-indigo-200"
+                      onClick={() => navigate(`/item/${item.item_id}`)}
+                    >
+                      <img
+                        src={item.image}
+                        alt={item.title}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    {canCancel && (
+                      <button
+                        onClick={() => handleRemoveItem(trade.trade_id, item.item_id, myItems.length === 1)}
+                        disabled={removingItemId === item.item_id}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {canCancel && myItems.length < 5 && (
+                  <button
+                    onClick={() => {
+                      const currentItemIds = myItems.map(i => i.item_id);
+                      fetchMyAvailableItems(trade.trade_id, currentItemIds);
+                      setAddingItemTradeId(trade.trade_id);
+                    }}
+                    className="w-20 h-20 rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 flex items-center justify-center text-slate-400 hover:text-indigo-600 transition-colors"
+                  >
+                    <Plus className="w-5 h-5" />
+                  </button>
+                )}
               </div>
-            )}
+            </div>
           </div>
 
           {/* Details */}
           <div className="flex-1 min-w-0">
             <div className="mb-2">
               <div className="flex items-center gap-2 mb-1">
-                <h3
-                  className="font-semibold text-slate-900 truncate cursor-pointer hover:text-indigo-600"
-                  onClick={() => navigate(`/item/${item?.item_id}`)}
-                >
-                  {item?.title}
-                </h3>
-                <span className="text-slate-400">↔</span>
-                {trader_item && (
-                  <h3
-                    className="font-semibold text-slate-900 truncate cursor-pointer hover:text-indigo-600"
-                    onClick={() => navigate(`/item/${trader_item?.item_id}`)}
-                  >
-                    {trader_item?.title}
-                  </h3>
-                )}
+                <span className="text-sm text-slate-600">
+                  {theirItems.length} item{theirItems.length !== 1 ? 's' : ''} ↔ {myItems.length} item{myItems.length !== 1 ? 's' : ''}
+                </span>
               </div>
-              {!trader_item && (
-                <p className="text-xs text-slate-500">Your item not available</p>
-              )}
             </div>
 
             {/* Other User */}
@@ -281,7 +409,7 @@ const Trades = () => {
 
               <Button
                 variant="outline"
-                onClick={() => navigate(`/messages/${otherUser.user_id}`)}
+                onClick={() => navigate(`/messages/${trade.trade_id}`)}
                 className="rounded-full"
                 data-testid={`message-btn-${trade.trade_id}`}
               >
@@ -399,6 +527,73 @@ const Trades = () => {
                 </>
               ) : (
                 "Cancel Trade"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      
+      {/* Add Item Dialog */}
+      <Dialog open={!!addingItemTradeId} onOpenChange={(open) => !open && setAddingItemTradeId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Item to Trade</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {myAvailableItems.length === 0 ? (
+              <p className="text-slate-500 text-center py-4">No available items to add</p>
+            ) : (
+              myAvailableItems.map((item) => {
+                const currentTrade = trades.find(t => t.trade.trade_id === addingItemTradeId);
+                if (!currentTrade) return null;
+                const isOwner = currentTrade.trade.owner_id === user.user_id;
+                const side = isOwner ? "owner" : "trader";
+                return (
+                  <div
+                    key={item.item_id}
+                    onClick={() => handleAddItem(addingItemTradeId, item.item_id, side)}
+                    className="p-3 border rounded-lg cursor-pointer hover:bg-slate-50"
+                  >
+                    <div className="flex gap-3">
+                      <img src={item.image} alt={item.title} className="w-16 h-16 object-cover rounded" />
+                      <div className="flex-1">
+                        <h4 className="font-medium">{item.title}</h4>
+                        <p className="text-sm text-slate-500">{item.category}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Delete Last Item Warning Dialog */}
+      <AlertDialog open={deleteLastItemDialog.isOpen} onOpenChange={(open) => !open && setDeleteLastItemDialog({ isOpen: false, tradeId: null, itemId: null })}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Last Item?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Removing this item will cancel the trade since you'll have no items left to trade. Are you sure you want to proceed?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removingItemId === deleteLastItemDialog.itemId}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDeleteLastItem}
+              disabled={removingItemId === deleteLastItemDialog.itemId}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {removingItemId === deleteLastItemDialog.itemId ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 spinner" />
+                  Removing...
+                </>
+              ) : (
+                "Remove Item & Cancel Trade"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>

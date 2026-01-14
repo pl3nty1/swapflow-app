@@ -3,6 +3,8 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
+import { usePreload } from "@/hooks/usePreload";
+import { PreloadContext } from "@/contexts/PreloadContext";
 
 // Pages
 import Landing from "@/pages/Landing";
@@ -217,7 +219,7 @@ function AppRouter() {
         }
       />
       <Route
-        path="/messages/:partnerId"
+        path="/messages/:tradeId"
         element={
           <ProtectedRoute>
             <Messages />
@@ -290,9 +292,14 @@ function AuthProvider({ children }) {
     }
   };
 
+  // Preload data after authentication
+  const preloadCache = usePreload(user, API, getAuthHeaders);
+
   return (
     <AuthContext.Provider value={{ user, setUser, isLoading, setIsLoading, logout, API, getAuthHeaders }}>
-      {children}
+      <PreloadContext.Provider value={preloadCache}>
+        {children}
+      </PreloadContext.Provider>
     </AuthContext.Provider>
   );
 }

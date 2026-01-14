@@ -2,28 +2,47 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "@/App";
+import { usePreloadCache } from "@/contexts/PreloadContext";
 import { Header } from "@/components/Header";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { Send, Loader2, ArrowLeft, MessageCircle } from "lucide-react";
+import { Send, Loader2, ArrowLeft, MessageCircle, ArrowLeftRight, Plus, Trash2, Check, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const Messages = () => {
-  const { partnerId } = useParams();
+  const { tradeId } = useParams();
   const navigate = useNavigate();
   const { user, API, getAuthHeaders } = useAuth();
+  const { getCachedConversations } = usePreloadCache();
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
   const [partner, setPartner] = useState(null);
+  const [trade, setTrade] = useState(null);
   const [newMessage, setNewMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef(null);
   const wsRef = useRef(null);
+  const [myAvailableItems, setMyAvailableItems] = useState([]);
+  const [addingItemTradeId, setAddingItemTradeId] = useState(null);
+  const [removingItemId, setRemovingItemId] = useState(null);
+  const [deleteLastItemDialog, setDeleteLastItemDialog] = useState({ isOpen: false, tradeId: null, itemId: null });
+  const [confirmingId, setConfirmingId] = useState(null);
 
   const fetchConversations = useCallback(async () => {
+    // Check cache first
+    const cached = getCachedConversations();
+    if (cached) {
+      setConversations(cached);
+      setIsLoading(false);
+      // Still fetch in background to update
+    }
+
     try {
       const headers = getAuthHeaders();
       const response = await axios.get(`${API}/conversations`, { 
@@ -39,44 +58,55 @@ const Messages = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, getCachedConversations]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   const fetchMessages = useCallback(async () => {
-    if (!partnerId) return;
+    if (!tradeId) return;
 
     try {
       const headers = getAuthHeaders();
-      const [messagesRes, partnerRes] = await Promise.all([
-        axios.get(`${API}/messages/${partnerId}`, { 
+      const [messagesRes, tradeRes] = await Promise.all([
+        axios.get(`${API}/messages/${tradeId}`, { 
           withCredentials: true,
           headers: headers
-        }),
-        axios.get(`${API}/users/${partnerId}`, { 
+        }).catch(() => ({ data: [] })), // If no messages exist, return empty array
+        axios.get(`${API}/trades/${tradeId}`, { 
           withCredentials: true,
           headers: headers
         }),
       ]);
-      setMessages(messagesRes.data);
-      setPartner(partnerRes.data);
+      setMessages(messagesRes.data || []);
+      setTrade(tradeRes.data);
+      // Set partner from trade
+      const isOwner = tradeRes.data.trade.owner_id === user.user_id;
+      setPartner(isOwner ? tradeRes.data.trader : tradeRes.data.owner);
     } catch (error) {
       console.error("Failed to fetch messages:", error);
-      toast.error("Failed to load messages");
+      if (error.response?.status === 404) {
+        toast.error("Trade not found");
+        navigate("/messages");
+      } else if (error.response?.status === 403) {
+        toast.error("You don't have access to this trade");
+        navigate("/messages");
+      } else {
+        toast.error("Failed to load messages");
+      }
     }
-  }, [API, partnerId]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, tradeId, user, navigate]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
 
   useEffect(() => {
-    if (partnerId) {
+    if (tradeId) {
       fetchMessages();
       // Mark messages as read when viewing conversation
       const markAsRead = async () => {
         try {
           const headers = getAuthHeaders();
           await axios.post(
-            `${API}/messages/${partnerId}/mark-read`,
+            `${API}/messages/${tradeId}/mark-read`,
             {},
             { withCredentials: true, headers: headers }
           );
@@ -89,7 +119,26 @@ const Messages = () => {
       };
       markAsRead();
     }
-  }, [partnerId, fetchMessages, API, fetchConversations]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [tradeId, fetchMessages, API, fetchConversations]); // getAuthHeaders is stable and doesn't need to be in dependencies
+
+  // Ensure current trade appears in conversations list even if not loaded yet
+  useEffect(() => {
+    if (tradeId && trade && partner && !conversations.find(c => c.trade_id === tradeId)) {
+      // Add current trade to conversations list if it's not there
+      setConversations(prev => {
+        if (prev.find(c => c.trade_id === tradeId)) return prev;
+        const newConv = {
+          trade_id: tradeId,
+          partner: partner,
+          last_message: null,
+          last_message_time: trade.trade.created_at,
+          unread_count: 0,
+          is_completed: trade.trade.is_completed
+        };
+        return [newConv, ...prev];
+      });
+    }
+  }, [tradeId, trade, partner, conversations]);
 
   // WebSocket connection
   useEffect(() => {
@@ -115,8 +164,8 @@ const Messages = () => {
             if (data.type === "new_message") {
               const newMsg = data.message;
               
-              // Add message if it's for current conversation
-              if (partnerId && (newMsg.sender_id === partnerId || newMsg.receiver_id === partnerId)) {
+              // Add message if it's for current trade
+              if (tradeId && newMsg.trade_id === tradeId) {
                 setMessages((prev) => {
                   // Avoid duplicates
                   if (prev.some((m) => m.message_id === newMsg.message_id)) {
@@ -125,13 +174,13 @@ const Messages = () => {
                   return [...prev, newMsg];
                 });
                 
-                // If we're viewing this conversation, mark the message as read immediately
-                if (newMsg.sender_id === partnerId && newMsg.receiver_id === user?.user_id) {
+                // If we're viewing this trade, mark the message as read immediately
+                if (tradeId && newMsg.trade_id === tradeId && newMsg.receiver_id === user?.user_id) {
                   const markAsRead = async () => {
                     try {
                       const headers = getAuthHeaders();
                       await axios.post(
-                        `${API}/messages/${partnerId}/mark-read`,
+                        `${API}/messages/${tradeId}/mark-read`,
                         {},
                         { withCredentials: true, headers: headers }
                       );
@@ -148,6 +197,9 @@ const Messages = () => {
               // Always refresh conversations list to show updated last message and unread counts
               // This ensures the list updates live even when just viewing the conversations
               fetchConversations();
+            } else if (data.type === "trade_updated" && tradeId && data.trade_id === tradeId) {
+              // Trade was updated, refresh trade data
+              fetchMessages();
             }
           } catch (error) {
             console.error("Failed to parse WebSocket message:", error);
@@ -175,7 +227,7 @@ const Messages = () => {
         wsRef.current.close();
       }
     };
-  }, [API, partnerId, fetchConversations, user]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, tradeId, fetchConversations, user]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   useEffect(() => {
     // Auto-scroll to bottom
@@ -184,7 +236,7 @@ const Messages = () => {
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !partnerId) return;
+    if (!newMessage.trim() || !tradeId) return;
 
     setIsSending(true);
     try {
@@ -193,7 +245,7 @@ const Messages = () => {
       const response = await axios.post(
         `${API}/messages`,
         {
-          receiver_id: partnerId,
+          trade_id: tradeId,
           content: newMessage.trim(),
         },
         { 
@@ -238,6 +290,125 @@ const Messages = () => {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
+  const fetchMyAvailableItems = useCallback(async (currentItemIds) => {
+    try {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API}/my-items`, {
+        withCredentials: true,
+        headers: headers
+      });
+      const available = response.data.filter(item => item.is_available);
+      // Filter out items already in trade
+      setMyAvailableItems(available.filter(item => !currentItemIds.includes(item.item_id)));
+    } catch (error) {
+      console.error("Failed to fetch items:", error);
+    }
+  }, [API]);
+
+  const handleAddItem = async (itemId, side) => {
+    if (!tradeId) return;
+    try {
+      const headers = getAuthHeaders();
+      await axios.post(
+        `${API}/trades/${tradeId}/items`,
+        { item_ids: [itemId], side },
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Item added to trade");
+      fetchMessages(); // Refresh trade data
+      setAddingItemTradeId(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to add item");
+    }
+  };
+
+  const handleRemoveItem = async (itemId, isLastItem = false) => {
+    if (!tradeId) return;
+    // If it's the last item, show confirmation dialog
+    if (isLastItem) {
+      setDeleteLastItemDialog({ isOpen: true, tradeId, itemId });
+      return;
+    }
+    
+    setRemovingItemId(itemId);
+    try {
+      const headers = getAuthHeaders();
+      await axios.delete(
+        `${API}/trades/${tradeId}/items/${itemId}`,
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Item removed from trade");
+      fetchMessages(); // Refresh trade data
+      setRemovingItemId(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to remove item");
+      setRemovingItemId(null);
+    }
+  };
+
+  const handleConfirmDeleteLastItem = async () => {
+    const { tradeId: dialogTradeId, itemId } = deleteLastItemDialog;
+    if (!dialogTradeId || !itemId) return;
+    
+    setRemovingItemId(itemId);
+    try {
+      const headers = getAuthHeaders();
+      // Remove the item (which will leave the trade with 0 items on that side, effectively canceling it)
+      await axios.delete(
+        `${API}/trades/${dialogTradeId}/items/${itemId}`,
+        { withCredentials: true, headers: headers }
+      );
+      // Then cancel the trade since it has no items on one side
+      await axios.delete(
+        `${API}/trades/${dialogTradeId}`,
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Item removed and trade cancelled");
+      fetchMessages();
+      setRemovingItemId(null);
+      setDeleteLastItemDialog({ isOpen: false, tradeId: null, itemId: null });
+      navigate("/messages");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to remove item");
+      setRemovingItemId(null);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!tradeId) return;
+    setConfirmingId(tradeId);
+    try {
+      const headers = getAuthHeaders();
+      await axios.post(
+        `${API}/trades/${tradeId}/confirm`,
+        {},
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Trade confirmed!");
+      fetchMessages();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to confirm trade");
+    } finally {
+      setConfirmingId(null);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!tradeId) return;
+    if (!window.confirm("Are you sure you want to cancel this trade?")) return;
+    try {
+      const headers = getAuthHeaders();
+      await axios.delete(
+        `${API}/trades/${tradeId}`,
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Trade cancelled");
+      navigate("/messages");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to cancel trade");
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-white">
@@ -276,12 +447,12 @@ const Messages = () => {
                   const hasUnread = unreadCount > 0;
                   return (
                     <div
-                      key={conv.partner.user_id}
-                      onClick={() => navigate(`/messages/${conv.partner.user_id}`)}
+                      key={conv.trade_id}
+                      onClick={() => navigate(`/messages/${conv.trade_id}`)}
                       className={`p-4 cursor-pointer hover:bg-slate-50 transition-colors border-b border-slate-50 ${
-                        partnerId === conv.partner.user_id ? "bg-slate-50" : ""
+                        tradeId === conv.trade_id ? "bg-slate-50" : ""
                       } ${hasUnread ? "bg-indigo-50" : ""}`}
-                      data-testid={`conversation-${conv.partner.user_id}`}
+                      data-testid={`conversation-${conv.trade_id}`}
                     >
                       <div className="flex items-center gap-3">
                         <Avatar className="h-10 w-10 flex-shrink-0">
@@ -316,7 +487,7 @@ const Messages = () => {
 
           {/* Chat Area */}
           <div className="md:col-span-2 bg-white rounded-2xl border border-slate-100 overflow-hidden flex flex-col">
-            {partnerId && partner ? (
+            {tradeId && partner && trade ? (
               <>
                 {/* Chat Header */}
                 <div className="p-4 border-b border-slate-100 flex items-center gap-3">
@@ -337,13 +508,150 @@ const Messages = () => {
                       {getInitials(partner.name)}
                     </AvatarFallback>
                   </Avatar>
-                  <div>
+                  <div className="flex-1">
                     <p
                       className="font-medium text-slate-900 cursor-pointer hover:text-indigo-600"
                       onClick={() => navigate(`/profile/${partner.user_id}`)}
                     >
                       {partner.username || partner.name}
                     </p>
+                    <p className="text-xs text-slate-500">
+                      Trade: {trade.trade.owner_item_ids?.length || 0} ↔ {trade.trade.trader_item_ids?.length || 0} items
+                      {trade.trade.is_completed && " • Completed"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Trade Display Section */}
+                <div className="p-4 border-b border-slate-100 bg-slate-50">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                      <ArrowLeftRight className="w-4 h-4" />
+                      Trade Details
+                    </h3>
+                    {trade.trade.is_completed && (
+                      <Badge className="bg-teal-600">Completed</Badge>
+                    )}
+                    {trade.trade.is_cancelled && (
+                      <Badge className="bg-slate-400">Cancelled</Badge>
+                    )}
+                  </div>
+                  
+                  {!trade.trade.is_completed && !trade.trade.is_cancelled && (
+                    <div className="flex gap-2 mb-3">
+                      <Button
+                        onClick={handleConfirm}
+                        disabled={confirmingId === tradeId}
+                        size="sm"
+                        className="bg-teal-600 hover:bg-teal-700 rounded-full"
+                      >
+                        {confirmingId === tradeId ? (
+                          <Loader2 className="w-4 h-4 mr-2 spinner" />
+                        ) : (
+                          <Check className="w-4 h-4 mr-2" />
+                        )}
+                        Trade Finished
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={handleCancel}
+                        size="sm"
+                        className="rounded-full text-red-600 border-red-200 hover:bg-red-50"
+                      >
+                        <X className="w-4 h-4 mr-2" />
+                        Cancel Trade
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="flex gap-4 items-start">
+                    {/* Their Items */}
+                    <div className="flex-1">
+                      <p className="text-xs text-slate-500 mb-2 text-center">
+                        {partner.username || partner.name}'s items
+                      </p>
+                      <div className="flex flex-wrap gap-2 justify-center">
+                        {(trade.trader_items || []).map((item) => (
+                          <div
+                            key={item.item_id}
+                            className="w-16 h-16 rounded-lg overflow-hidden cursor-pointer border-2 border-indigo-200 hover:border-indigo-400 transition-colors"
+                            onClick={() => navigate(`/item/${item.item_id}`)}
+                          >
+                            <img
+                              src={item.image}
+                              alt={item.title}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        ))}
+                        {(!trade.trader_items || trade.trader_items.length === 0) && (
+                          <p className="text-xs text-slate-400 text-center py-4">No items</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Arrow */}
+                    <div className="flex items-center text-slate-400 pt-6">
+                      <ArrowLeftRight className="w-5 h-5" />
+                    </div>
+
+                    {/* My Items */}
+                    <div className="flex-1">
+                      <p className="text-xs text-slate-500 mb-2 text-center">Your items</p>
+                      <div className="flex flex-wrap gap-2 justify-center">
+                        {(trade.owner_items || []).map((item) => {
+                          const isOwner = trade.trade.owner_id === user.user_id;
+                          const myItems = isOwner ? trade.owner_items : trade.trader_items;
+                          const canEdit = !trade.trade.is_completed && !trade.trade.is_cancelled;
+                          
+                          return (
+                            <div key={item.item_id} className="relative group">
+                              <div
+                                className="w-16 h-16 rounded-lg overflow-hidden cursor-pointer border-2 border-indigo-200 hover:border-indigo-400 transition-colors"
+                                onClick={() => navigate(`/item/${item.item_id}`)}
+                              >
+                                <img
+                                  src={item.image}
+                                  alt={item.title}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              {canEdit && (
+                                <button
+                                  onClick={() => handleRemoveItem(item.item_id, myItems.length === 1)}
+                                  disabled={removingItemId === item.item_id}
+                                  className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {!trade.trade.is_completed && !trade.trade.is_cancelled && (
+                          (() => {
+                            const isOwner = trade.trade.owner_id === user.user_id;
+                            const myItems = isOwner ? trade.owner_items : trade.trader_items;
+                            const side = isOwner ? "owner" : "trader";
+                            return myItems.length < 5 && (
+                              <button
+                                onClick={() => {
+                                  const currentItemIds = myItems.map(i => i.item_id);
+                                  fetchMyAvailableItems(currentItemIds);
+                                  setAddingItemTradeId(tradeId);
+                                }}
+                                className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-300 hover:border-indigo-400 flex items-center justify-center text-slate-400 hover:text-indigo-600 transition-colors"
+                              >
+                                <Plus className="w-4 h-4" />
+                              </button>
+                            );
+                          })()
+                        )}
+                        {(!trade.owner_items || trade.owner_items.length === 0) && trade.trade.is_completed && (
+                          <p className="text-xs text-slate-400 text-center py-4">No items</p>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -352,6 +660,8 @@ const Messages = () => {
                   <div className="space-y-4">
                     {messages.map((msg) => {
                       const isSent = msg.sender_id === user.user_id;
+                      const isItemRequest = msg.message_type === "item_request" && msg.item_request_data?.status === "pending";
+                      
                       return (
                         <div
                           key={msg.message_id}
@@ -363,7 +673,56 @@ const Messages = () => {
                             }`}
                             data-testid={`message-${msg.message_id}`}
                           >
-                            <p className="break-words">{msg.content}</p>
+                            {isItemRequest && !isSent ? (
+                              <div className="space-y-2">
+                                <p className="break-words">{msg.content}</p>
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    onClick={async () => {
+                                      try {
+                                        const headers = getAuthHeaders();
+                                        await axios.post(
+                                          `${API}/trades/${tradeId}/items/request/${msg.item_request_data.request_id}/respond`,
+                                          { accepted: true },
+                                          { withCredentials: true, headers: headers }
+                                        );
+                                        toast.success("Item request accepted");
+                                        fetchMessages();
+                                        fetchConversations();
+                                      } catch (error) {
+                                        toast.error(error.response?.data?.detail || "Failed to accept request");
+                                      }
+                                    }}
+                                    className="bg-teal-600 hover:bg-teal-700"
+                                  >
+                                    Accept
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={async () => {
+                                      try {
+                                        const headers = getAuthHeaders();
+                                        await axios.post(
+                                          `${API}/trades/${tradeId}/items/request/${msg.item_request_data.request_id}/respond`,
+                                          { accepted: false },
+                                          { withCredentials: true, headers: headers }
+                                        );
+                                        toast.success("Item request declined");
+                                        fetchMessages();
+                                      } catch (error) {
+                                        toast.error(error.response?.data?.detail || "Failed to decline request");
+                                      }
+                                    }}
+                                  >
+                                    Decline
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="break-words">{msg.content}</p>
+                            )}
                             <p
                               className={`text-xs mt-1 ${
                                 isSent ? "text-indigo-200" : "text-slate-400"
@@ -401,17 +760,80 @@ const Messages = () => {
                   </Button>
                 </form>
               </>
+            ) : tradeId && !trade ? (
+              <div className="flex-1 flex items-center justify-center text-slate-500">
+                <div className="text-center">
+                  <MessageCircle className="w-12 h-12 mx-auto mb-4 text-slate-300" />
+                  <p>Loading trade...</p>
+                </div>
+              </div>
             ) : (
               <div className="flex-1 flex items-center justify-center text-slate-500">
                 <div className="text-center">
                   <MessageCircle className="w-12 h-12 mx-auto mb-4 text-slate-300" />
-                  <p>Select a conversation to start messaging</p>
+                  <p>Select a trade to start messaging</p>
                 </div>
               </div>
             )}
           </div>
         </div>
       </main>
+
+      {/* Add Item Dialog */}
+      <Dialog open={!!addingItemTradeId} onOpenChange={(open) => !open && setAddingItemTradeId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Item to Trade</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {myAvailableItems.length === 0 ? (
+              <p className="text-slate-500 text-center py-4">No available items to add</p>
+            ) : (
+              myAvailableItems.map((item) => {
+                if (!trade) return null;
+                const isOwner = trade.trade.owner_id === user.user_id;
+                const side = isOwner ? "owner" : "trader";
+                return (
+                  <div
+                    key={item.item_id}
+                    onClick={() => handleAddItem(item.item_id, side)}
+                    className="p-3 border rounded-lg cursor-pointer hover:bg-slate-50"
+                  >
+                    <div className="flex gap-3">
+                      <img src={item.image} alt={item.title} className="w-16 h-16 object-cover rounded" />
+                      <div className="flex-1">
+                        <h4 className="font-medium">{item.title}</h4>
+                        <p className="text-sm text-slate-500">{item.category}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Last Item Warning Dialog */}
+      <AlertDialog open={deleteLastItemDialog.isOpen} onOpenChange={(open) => !open && setDeleteLastItemDialog({ isOpen: false, tradeId: null, itemId: null })}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Last Item?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Removing this item will cancel the entire trade. Are you sure you want to continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDeleteLastItem}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Delete Trade
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

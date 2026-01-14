@@ -26,14 +26,11 @@ const ItemDetail = () => {
   const [item, setItem] = useState(null);
   const [owner, setOwner] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isMessageOpen, setIsMessageOpen] = useState(false);
-  const [message, setMessage] = useState("");
-  const [isSending, setIsSending] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isTradeOpen, setIsTradeOpen] = useState(false);
   const [isCreatingTrade, setIsCreatingTrade] = useState(false);
   const [myItems, setMyItems] = useState([]);
-  const [selectedItemId, setSelectedItemId] = useState(null);
+  const [selectedItemIds, setSelectedItemIds] = useState([]);
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [preferredItems, setPreferredItems] = useState([]);
 
@@ -71,35 +68,6 @@ const ItemDetail = () => {
     fetchItem();
   }, [fetchItem]);
 
-  const handleSendMessage = async () => {
-    if (!message.trim()) return;
-
-    setIsSending(true);
-    try {
-      const headers = getAuthHeaders();
-
-      await axios.post(
-        `${API}/messages`,
-        {
-          receiver_id: owner.user_id,
-          item_id: itemId,
-          content: message.trim(),
-        },
-        { 
-          withCredentials: true,
-          headers: headers
-        }
-      );
-      toast.success("Message sent!");
-      setMessage("");
-      setIsMessageOpen(false);
-      navigate(`/messages/${owner.user_id}`);
-    } catch (error) {
-      toast.error("Failed to send message");
-    } finally {
-      setIsSending(false);
-    }
-  };
 
   const fetchMyItems = useCallback(async () => {
     setIsLoadingItems(true);
@@ -122,13 +90,27 @@ const ItemDetail = () => {
 
   const handleOpenTradeDialog = () => {
     setIsTradeOpen(true);
-    setSelectedItemId(null);
+    setSelectedItemIds([]);
     fetchMyItems();
   };
 
+  const handleToggleItem = (itemId) => {
+    setSelectedItemIds(prev => {
+      if (prev.includes(itemId)) {
+        return prev.filter(id => id !== itemId);
+      } else {
+        if (prev.length >= 5) {
+          toast.error("Maximum 5 items per side allowed");
+          return prev;
+        }
+        return [...prev, itemId];
+      }
+    });
+  };
+
   const handleStartTrade = async () => {
-    if (!selectedItemId) {
-      toast.error("Please select an item to trade");
+    if (selectedItemIds.length === 0) {
+      toast.error("Please select at least one item to trade");
       return;
     }
 
@@ -139,9 +121,8 @@ const ItemDetail = () => {
       await axios.post(
         `${API}/trades`,
         {
-          item_id: itemId,
-          trader_item_id: selectedItemId,
-          owner_id: owner.user_id,
+          owner_item_ids: [itemId],
+          trader_item_ids: selectedItemIds,
         },
         { 
           withCredentials: true,
@@ -150,7 +131,7 @@ const ItemDetail = () => {
       );
       toast.success("Trade initiated! Check your trades page.");
       setIsTradeOpen(false);
-      setSelectedItemId(null);
+      setSelectedItemIds([]);
       navigate("/trades");
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to start trade");
@@ -335,15 +316,6 @@ const ItemDetail = () => {
                   <ArrowLeftRight className="w-5 h-5 mr-2" />
                   Start Trade
                 </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setIsMessageOpen(true)}
-                  className="rounded-full py-6"
-                  data-testid="message-btn"
-                >
-                  <MessageCircle className="w-5 h-5 mr-2" />
-                  Message
-                </Button>
               </div>
             )}
 
@@ -369,42 +341,6 @@ const ItemDetail = () => {
         </div>
       </main>
 
-      {/* Message Dialog */}
-      <Dialog open={isMessageOpen} onOpenChange={setIsMessageOpen}>
-        <DialogContent className="sm:max-w-md" data-testid="message-modal">
-          <DialogHeader>
-            <DialogTitle style={{ fontFamily: "Manrope, sans-serif" }}>
-              Send Message
-            </DialogTitle>
-            <DialogDescription>
-              Message {owner?.username || owner?.name} about this item
-            </DialogDescription>
-          </DialogHeader>
-
-          <Textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Hi! I'm interested in trading for this item..."
-            className="min-h-[120px] bg-slate-50"
-            data-testid="message-textarea"
-          />
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsMessageOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSendMessage}
-              disabled={!message.trim() || isSending}
-              className="bg-indigo-600 hover:bg-indigo-700"
-              data-testid="send-message-btn"
-            >
-              {isSending ? "Sending..." : "Send Message"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Trade Confirmation Dialog */}
       <Dialog open={isTradeOpen} onOpenChange={setIsTradeOpen}>
         <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto" data-testid="trade-modal">
@@ -413,14 +349,19 @@ const ItemDetail = () => {
               Start Trade
             </DialogTitle>
             <DialogDescription>
-              Select an item to trade for "{item.title}"
+              Select items to trade for "{item.title}" (up to 5 items)
             </DialogDescription>
           </DialogHeader>
 
           <div className="py-4 space-y-4">
             <p className="text-sm text-slate-600">
-              Choose one of your available items to trade. Both parties must confirm to complete the trade.
+              Choose one or more of your available items to trade. Both parties must confirm to complete the trade.
             </p>
+            {selectedItemIds.length > 0 && (
+              <p className="text-sm text-indigo-600 font-medium">
+                {selectedItemIds.length} item{selectedItemIds.length > 1 ? 's' : ''} selected
+              </p>
+            )}
 
             {isLoadingItems ? (
               <div className="flex items-center justify-center py-8">
@@ -444,9 +385,9 @@ const ItemDetail = () => {
                 {myItems.map((myItem) => (
                   <div
                     key={myItem.item_id}
-                    onClick={() => setSelectedItemId(myItem.item_id)}
+                    onClick={() => handleToggleItem(myItem.item_id)}
                     className={`p-3 border-2 rounded-lg cursor-pointer transition-all ${
-                      selectedItemId === myItem.item_id
+                      selectedItemIds.includes(myItem.item_id)
                         ? "border-indigo-600 bg-indigo-50"
                         : "border-slate-200 hover:border-indigo-300"
                     }`}
@@ -461,7 +402,7 @@ const ItemDetail = () => {
                         <h4 className="font-medium text-slate-900">{myItem.title}</h4>
                         <p className="text-sm text-slate-500">{myItem.category}</p>
                       </div>
-                      {selectedItemId === myItem.item_id && (
+                      {selectedItemIds.includes(myItem.item_id) && (
                         <div className="flex items-center text-indigo-600">
                           ✓
                         </div>
@@ -479,7 +420,7 @@ const ItemDetail = () => {
             </Button>
             <Button
               onClick={handleStartTrade}
-              disabled={isCreatingTrade || !selectedItemId || myItems.length === 0}
+              disabled={isCreatingTrade || selectedItemIds.length === 0 || myItems.length === 0}
               className="bg-indigo-600 hover:bg-indigo-700"
               data-testid="confirm-trade-btn"
             >

@@ -498,13 +498,22 @@ const AdminDashboard = () => {
                 </TableHeader>
                 <TableBody>
                   {filteredUsers.map((u) => (
-                    <TableRow key={u.user_id}>
+                    <TableRow 
+                      key={u.user_id}
+                      className="cursor-pointer hover:bg-slate-50"
+                      onClick={() => navigate(`/profile/${u.user_id}`)}
+                    >
                       <TableCell className="font-medium">{u.name}</TableCell>
                       <TableCell>{u.email}</TableCell>
                       <TableCell>{u.username || "-"}</TableCell>
                       <TableCell>{u.trade_points || 0}</TableCell>
                       <TableCell>
                         {u.rating ? `${u.rating} (${u.rating_count})` : "-"}
+                      </TableCell>
+                      <TableCell>
+                        {u.last_active
+                          ? new Date(u.last_active).toLocaleDateString()
+                          : "-"}
                       </TableCell>
                       <TableCell>
                         {u.is_admin ? (
@@ -516,7 +525,7 @@ const AdminDashboard = () => {
                           <Badge variant="outline">User</Badge>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex gap-2">
                           {!u.is_admin ? (
                             <Button
