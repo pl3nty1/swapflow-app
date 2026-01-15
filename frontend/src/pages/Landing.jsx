@@ -31,6 +31,7 @@ const Landing = () => {
   const navigate = useNavigate();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [featuredItems, setFeaturedItems] = useState([]);
+  const [pendingItemId, setPendingItemId] = useState(null);
 
   useEffect(() => {
     // Check for OAuth callback (ID token in URL hash)
