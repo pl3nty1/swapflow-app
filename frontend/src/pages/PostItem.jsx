@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "@/App";
+import { usePreloadCache } from "@/contexts/PreloadContext";
 import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +28,7 @@ import {
 const PostItem = () => {
   const navigate = useNavigate();
   const { API, getAuthHeaders } = useAuth();
+  const { invalidateItemCache } = usePreloadCache();
   const fileInputRef = useRef(null);
   const [isLoading, setIsLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
@@ -201,6 +203,8 @@ const PostItem = () => {
       );
 
       toast.success("Item posted successfully!");
+      // Invalidate item caches since a new item was added
+      invalidateItemCache();
       navigate("/dashboard");
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to post item");

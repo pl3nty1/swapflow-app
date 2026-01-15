@@ -16,6 +16,13 @@ export const usePreload = (user, API, getAuthHeaders) => {
     unreadCount: null,
     timestamp: null
   });
+  
+  // Item cache: stores items by ID and item lists by query key
+  const itemCacheRef = useRef({
+    itemsById: {}, // { itemId: { item, owner, timestamp } }
+    itemLists: {}, // { queryKey: { items, timestamp } }
+    CACHE_DURATION: 5 * 60 * 1000 // 5 minutes
+  });
 
   useEffect(() => {
     // Only preload if user is authenticated and we haven't preloaded yet
@@ -108,6 +115,12 @@ export const usePreload = (user, API, getAuthHeaders) => {
     return () => clearTimeout(timeoutId);
   }, [user, API, getAuthHeaders]);
 
+  // Helper to generate query key for item lists
+  const getItemListKey = (params = {}) => {
+    const sortedParams = Object.keys(params).sort().map(key => `${key}:${params[key]}`).join('|');
+    return sortedParams || 'all';
+  };
+
   // Return cache getter functions
   return {
     getCachedConversations: () => {
@@ -159,6 +172,63 @@ export const usePreload = (user, API, getAuthHeaders) => {
       }
       return null;
     },
+    // Item cache functions
+    getCachedItem: (itemId) => {
+      const cached = itemCacheRef.current.itemsById[itemId];
+      if (cached && Date.now() - cached.timestamp < itemCacheRef.current.CACHE_DURATION) {
+        return cached;
+      }
+      return null;
+    },
+    setCachedItem: (itemId, item, owner = null) => {
+      itemCacheRef.current.itemsById[itemId] = {
+        item,
+        owner,
+        timestamp: Date.now()
+      };
+    },
+    getCachedItemList: (params = {}) => {
+      const key = getItemListKey(params);
+      const cached = itemCacheRef.current.itemLists[key];
+      if (cached && Date.now() - cached.timestamp < itemCacheRef.current.CACHE_DURATION) {
+        return cached.items;
+      }
+      return null;
+    },
+    setCachedItemList: (params = {}, items) => {
+      const key = getItemListKey(params);
+      itemCacheRef.current.itemLists[key] = {
+        items,
+        timestamp: Date.now()
+      };
+      // Also cache individual items
+      items.forEach(item => {
+        if (item.item_id) {
+          itemCacheRef.current.itemsById[item.item_id] = {
+            item,
+            owner: item.owner || null,
+            timestamp: Date.now()
+          };
+        }
+      });
+    },
+    invalidateItemCache: (itemId = null) => {
+      if (itemId) {
+        // Invalidate specific item
+        delete itemCacheRef.current.itemsById[itemId];
+        // Invalidate all lists that might contain this item
+        Object.keys(itemCacheRef.current.itemLists).forEach(key => {
+          const list = itemCacheRef.current.itemLists[key];
+          if (list && list.items && list.items.some(item => item.item_id === itemId)) {
+            delete itemCacheRef.current.itemLists[key];
+          }
+        });
+      } else {
+        // Invalidate all item caches
+        itemCacheRef.current.itemsById = {};
+        itemCacheRef.current.itemLists = {};
+      }
+    },
     invalidateCache: () => {
       preloadCacheRef.current = {
         conversations: null,
@@ -169,6 +239,8 @@ export const usePreload = (user, API, getAuthHeaders) => {
         unreadCount: null,
         timestamp: null
       };
+      itemCacheRef.current.itemsById = {};
+      itemCacheRef.current.itemLists = {};
       preloadedRef.current = false;
     }
   };

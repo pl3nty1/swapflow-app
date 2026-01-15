@@ -10,20 +10,23 @@ import { Search, Loader2 } from "lucide-react";
 
 const Dashboard = () => {
   const { API } = useAuth();
-  const { getCachedItems, getCachedCategories } = usePreloadCache();
-  const [items, setItems] = useState([]);
+  const { getCachedItems, getCachedCategories, getCachedItemList, setCachedItemList } = usePreloadCache();
+  const [allItems, setAllItems] = useState([]); // Store all items for client-side filtering
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [owners, setOwners] = useState({});
 
-  const fetchItems = useCallback(async () => {
-    // Check cache first (only if no category filter)
-    if (!selectedCategory) {
-      const cached = getCachedItems();
-      if (cached) {
-        setItems(cached);
+  const fetchItems = useCallback(async (showCached = true) => {
+    // Always fetch ALL items (no category filter) for client-side filtering
+    const params = { include_owners: true };
+    
+    // Check cache first and show immediately
+    if (showCached) {
+      const cached = getCachedItemList(params);
+      if (cached && cached.length > 0) {
+        setAllItems(cached);
         const ownerMap = {};
         cached.forEach((item) => {
           if (item.owner) {
@@ -32,63 +35,114 @@ const Dashboard = () => {
         });
         setOwners(ownerMap);
         setIsLoading(false);
-        // Still fetch in background to update
+        // Extract categories from cached items
+        const categorySet = new Set(cached.map(item => item.category).filter(Boolean));
+        const categoryList = Array.from(categorySet).map(name => ({ name })).sort((a, b) => a.name.localeCompare(b.name));
+        setCategories(categoryList);
+        // Continue to fetch fresh data in background
       }
     }
 
     try {
-      const params = selectedCategory ? { category: selectedCategory, include_owners: true } : { include_owners: true };
       const response = await axios.get(`${API}/items`, { params, withCredentials: true });
-      setItems(response.data);
-
-      // Extract owners from items (already included in response)
-      const ownerMap = {};
-      response.data.forEach((item) => {
-        if (item.owner) {
-          ownerMap[item.owner.user_id] = item.owner;
+      const freshItems = response.data;
+      
+      // Check for desync: compare cached vs fresh
+      if (showCached) {
+        const cached = getCachedItemList(params);
+        if (cached) {
+          const cachedIds = new Set(cached.map(i => i.item_id));
+          const freshIds = new Set(freshItems.map(i => i.item_id));
+          
+          // Check if there are differences
+          const hasNewItems = freshItems.some(i => !cachedIds.has(i.item_id));
+          const hasRemovedItems = cached.some(i => !freshIds.has(i.item_id));
+          const hasUpdatedItems = cached.some(cachedItem => {
+            const freshItem = freshItems.find(f => f.item_id === cachedItem.item_id);
+            return freshItem && JSON.stringify(cachedItem) !== JSON.stringify(freshItem);
+          });
+          
+          // Only update if there's a desync
+          if (hasNewItems || hasRemovedItems || hasUpdatedItems) {
+            setAllItems(freshItems);
+            const ownerMap = {};
+            freshItems.forEach((item) => {
+              if (item.owner) {
+                ownerMap[item.owner.user_id] = item.owner;
+              }
+            });
+            setOwners(ownerMap);
+            // Update categories from fresh items
+            const categorySet = new Set(freshItems.map(item => item.category).filter(Boolean));
+            const categoryList = Array.from(categorySet).map(name => ({ name })).sort((a, b) => a.name.localeCompare(b.name));
+            setCategories(categoryList);
+          }
+        } else {
+          // No cache, set fresh data
+          setAllItems(freshItems);
+          const ownerMap = {};
+          freshItems.forEach((item) => {
+            if (item.owner) {
+              ownerMap[item.owner.user_id] = item.owner;
+            }
+          });
+          setOwners(ownerMap);
+          // Extract categories from fresh items
+          const categorySet = new Set(freshItems.map(item => item.category).filter(Boolean));
+          const categoryList = Array.from(categorySet).map(name => ({ name })).sort((a, b) => a.name.localeCompare(b.name));
+          setCategories(categoryList);
         }
-      });
-      setOwners(ownerMap);
+      } else {
+        // Not showing cached, set fresh data directly
+        setAllItems(freshItems);
+        const ownerMap = {};
+        freshItems.forEach((item) => {
+          if (item.owner) {
+            ownerMap[item.owner.user_id] = item.owner;
+          }
+        });
+        setOwners(ownerMap);
+        // Extract categories from fresh items
+        const categorySet = new Set(freshItems.map(item => item.category).filter(Boolean));
+        const categoryList = Array.from(categorySet).map(name => ({ name })).sort((a, b) => a.name.localeCompare(b.name));
+        setCategories(categoryList);
+      }
+      
+      // Update cache with fresh data
+      setCachedItemList(params, freshItems);
     } catch (error) {
       console.error("Failed to fetch items:", error);
+      // If we showed cached data and fetch failed, keep showing cached
+      if (!showCached) {
+        setIsLoading(false);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [API, selectedCategory, getCachedItems]);
-
-  const fetchCategories = useCallback(async () => {
-    // Check cache first
-    const cached = getCachedCategories();
-    if (cached) {
-      const sorted = [...cached].sort((a, b) => a.name.localeCompare(b.name));
-      setCategories(sorted);
-      // Still fetch in background to update
-    }
-
-    try {
-      const response = await axios.get(`${API}/categories`, { withCredentials: true });
-      // Sort alphabetically for stable order (backend already does this, but ensure consistency)
-      const sorted = [...response.data].sort((a, b) => a.name.localeCompare(b.name));
-      setCategories(sorted);
-    } catch (error) {
-      console.error("Failed to fetch categories:", error);
-    }
-  }, [API, getCachedCategories]);
+  }, [API, getCachedItemList, setCachedItemList]);
 
   useEffect(() => {
     fetchItems();
-    fetchCategories();
-  }, [fetchItems, fetchCategories]);
+  }, [fetchItems]);
 
-  // Filter items by search query
-  const filteredItems = items.filter((item) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      item.title.toLowerCase().includes(query) ||
-      item.category.toLowerCase().includes(query) ||
-      item.description?.toLowerCase().includes(query)
-    );
+  // Filter items client-side by category and search query
+  const filteredItems = allItems.filter((item) => {
+    // Filter by category (client-side)
+    if (selectedCategory && item.category !== selectedCategory) {
+      return false;
+    }
+    
+    // Filter by search query
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      return (
+        item.title.toLowerCase().includes(query) ||
+        item.category.toLowerCase().includes(query) ||
+        item.description?.toLowerCase().includes(query)
+      );
+    }
+    
+    return true;
   });
 
   return (

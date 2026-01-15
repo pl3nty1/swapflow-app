@@ -194,9 +194,28 @@ const Messages = () => {
                 }
               }
               
-              // Always refresh conversations list to show updated last message and unread counts
-              // This ensures the list updates live even when just viewing the conversations
-              fetchConversations();
+              // Update conversations list optimistically (only last message and unread count)
+              setConversations((prev) => {
+                const existingIndex = prev.findIndex(conv => conv.trade_id === newMsg.trade_id);
+                if (existingIndex >= 0) {
+                  // Update existing conversation
+                  return prev.map((conv, idx) => {
+                    if (idx === existingIndex) {
+                      return {
+                        ...conv,
+                        last_message: newMsg.content,
+                        last_message_time: newMsg.created_at,
+                        unread_count: newMsg.receiver_id === user?.user_id 
+                          ? (conv.unread_count || 0) + 1 
+                          : conv.unread_count
+                      };
+                    }
+                    return conv;
+                  });
+                }
+                // If conversation doesn't exist, it will be added by fetchConversations when needed
+                return prev;
+              });
             } else if (data.type === "trade_updated" && tradeId && data.trade_id === tradeId) {
               // Trade was updated, refresh trade data
               fetchMessages();
@@ -238,31 +257,55 @@ const Messages = () => {
     e.preventDefault();
     if (!newMessage.trim() || !tradeId) return;
 
+    const messageText = newMessage.trim();
+    const tempId = `temp_${Date.now()}`;
+    
+    // OPTIMISTIC UPDATE: Add message immediately for instant feedback
+    const optimisticMessage = {
+      message_id: tempId,
+      trade_id: tradeId,
+      sender_id: user.user_id,
+      receiver_id: partner?.user_id || "",
+      content: messageText,
+      created_at: new Date().toISOString(),
+      message_type: "text",
+      read_at: null
+    };
+    
+    setMessages((prev) => [...prev, optimisticMessage]);
+    setNewMessage("");
     setIsSending(true);
+
     try {
       const headers = getAuthHeaders();
-
       const response = await axios.post(
         `${API}/messages`,
         {
           trade_id: tradeId,
-          content: newMessage.trim(),
+          content: messageText,
         },
         { 
           withCredentials: true,
           headers: headers
         }
       );
-      // Only add message if it doesn't already exist (WebSocket might have already added it)
+      
+      // Replace optimistic message with real one (WebSocket might have already done this)
       setMessages((prev) => {
-        if (prev.some((m) => m.message_id === response.data.message_id)) {
-          return prev;
+        // Remove optimistic message
+        const filtered = prev.filter(m => m.message_id !== tempId);
+        // Add real message if not already present (WebSocket might have added it)
+        if (!filtered.some(m => m.message_id === response.data.message_id)) {
+          return [...filtered, response.data];
         }
-        return [...prev, response.data];
+        return filtered;
       });
-      setNewMessage("");
-      fetchConversations(); // Refresh conversation list
+      
+      // Don't call fetchConversations() - WebSocket will handle it automatically
     } catch (error) {
+      // Rollback optimistic update on error
+      setMessages((prev) => prev.filter(m => m.message_id !== tempId));
+      setNewMessage(messageText); // Restore message text
       toast.error("Failed to send message");
     } finally {
       setIsSending(false);
@@ -306,7 +349,31 @@ const Messages = () => {
   }, [API]);
 
   const handleAddItem = async (itemId, side) => {
-    if (!tradeId) return;
+    if (!tradeId || !trade) return;
+    
+    // Find the item to add
+    const itemToAdd = myAvailableItems.find(item => item.item_id === itemId);
+    if (!itemToAdd) return;
+    
+    // OPTIMISTIC UPDATE: Add item to UI immediately
+    const isOwner = trade.trade.owner_id === user.user_id;
+    const updatedTrade = { ...trade };
+    if (isOwner && side === "owner") {
+      updatedTrade.owner_items = [...(trade.owner_items || []), itemToAdd];
+      updatedTrade.trade = {
+        ...trade.trade,
+        owner_item_ids: [...(trade.trade.owner_item_ids || []), itemId]
+      };
+    } else if (!isOwner && side === "trader") {
+      updatedTrade.trader_items = [...(trade.trader_items || []), itemToAdd];
+      updatedTrade.trade = {
+        ...trade.trade,
+        trader_item_ids: [...(trade.trade.trader_item_ids || []), itemId]
+      };
+    }
+    setTrade(updatedTrade);
+    setAddingItemTradeId(null);
+    
     try {
       const headers = getAuthHeaders();
       await axios.post(
@@ -314,33 +381,61 @@ const Messages = () => {
         { item_ids: [itemId], side },
         { withCredentials: true, headers: headers }
       );
+      // Don't call fetchMessages() - WebSocket will handle it
       toast.success("Item added to trade");
-      fetchMessages(); // Refresh trade data
-      setAddingItemTradeId(null);
     } catch (error) {
+      // Rollback on error
+      setTrade(trade);
       toast.error(error.response?.data?.detail || "Failed to add item");
     }
   };
 
   const handleRemoveItem = async (itemId, isLastItem = false) => {
-    if (!tradeId) return;
+    if (!tradeId || !trade) return;
     // If it's the last item, show confirmation dialog
     if (isLastItem) {
       setDeleteLastItemDialog({ isOpen: true, tradeId, itemId });
       return;
     }
     
+    // OPTIMISTIC UPDATE: Remove item from UI immediately
+    const isOwner = trade.trade.owner_id === user.user_id;
+    const updatedTrade = { ...trade };
+    let itemRemoved = false;
+    
+    if (isOwner) {
+      updatedTrade.owner_items = (trade.owner_items || []).filter(item => item.item_id !== itemId);
+      updatedTrade.trade = {
+        ...trade.trade,
+        owner_item_ids: (trade.trade.owner_item_ids || []).filter(id => id !== itemId)
+      };
+      itemRemoved = trade.owner_items?.some(item => item.item_id === itemId);
+    } else {
+      updatedTrade.trader_items = (trade.trader_items || []).filter(item => item.item_id !== itemId);
+      updatedTrade.trade = {
+        ...trade.trade,
+        trader_item_ids: (trade.trade.trader_item_ids || []).filter(id => id !== itemId)
+      };
+      itemRemoved = trade.trader_items?.some(item => item.item_id === itemId);
+    }
+    
+    if (itemRemoved) {
+      setTrade(updatedTrade);
+    }
     setRemovingItemId(itemId);
+    
     try {
       const headers = getAuthHeaders();
       await axios.delete(
         `${API}/trades/${tradeId}/items/${itemId}`,
         { withCredentials: true, headers: headers }
       );
+      // Don't call fetchMessages() - WebSocket will handle it
       toast.success("Item removed from trade");
-      fetchMessages(); // Refresh trade data
       setRemovingItemId(null);
     } catch (error) {
+      // Rollback on error
+      setTrade(trade);
       toast.error(error.response?.data?.detail || "Failed to remove item");
       setRemovingItemId(null);
     }
@@ -350,7 +445,11 @@ const Messages = () => {
     const { tradeId: dialogTradeId, itemId } = deleteLastItemDialog;
     if (!dialogTradeId || !itemId) return;
     
+    // OPTIMISTIC UPDATE: Navigate away immediately (trade will be cancelled)
+    setDeleteLastItemDialog({ isOpen: false, tradeId: null, itemId: null });
+    navigate("/messages");
     setRemovingItemId(itemId);
+    
     try {
       const headers = getAuthHeaders();
       // Remove the item (which will leave the trade with 0 items on that side, effectively canceling it)
@@ -364,10 +463,7 @@ const Messages = () => {
         { withCredentials: true, headers: headers }
       );
       toast.success("Item removed and trade cancelled");
-      fetchMessages();
       setRemovingItemId(null);
-      setDeleteLastItemDialog({ isOpen: false, tradeId: null, itemId: null });
-      navigate("/messages");
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to remove item");
       setRemovingItemId(null);
@@ -375,8 +471,20 @@ const Messages = () => {
   };
 
   const handleConfirm = async () => {
-    if (!tradeId) return;
+    if (!tradeId || !trade) return;
+    
+    // OPTIMISTIC UPDATE: Mark as confirmed immediately
+    const isOwner = trade.trade.owner_id === user.user_id;
+    const updatedTrade = {
+      ...trade,
+      trade: {
+        ...trade.trade,
+        ...(isOwner ? { owner_confirmed: true } : { trader_confirmed: true })
+      }
+    };
+    setTrade(updatedTrade);
     setConfirmingId(tradeId);
+    
     try {
       const headers = getAuthHeaders();
       await axios.post(
@@ -384,9 +492,11 @@ const Messages = () => {
         {},
         { withCredentials: true, headers: headers }
       );
+      // Don't call fetchMessages() - WebSocket will handle it
       toast.success("Trade confirmed!");
-      fetchMessages();
     } catch (error) {
+      // Rollback on error
+      setTrade(trade);
       toast.error(error.response?.data?.detail || "Failed to confirm trade");
     } finally {
       setConfirmingId(null);
@@ -396,6 +506,10 @@ const Messages = () => {
   const handleCancel = async () => {
     if (!tradeId) return;
     if (!window.confirm("Are you sure you want to cancel this trade?")) return;
+    
+    // OPTIMISTIC UPDATE: Navigate away immediately
+    navigate("/messages");
+    
     try {
       const headers = getAuthHeaders();
       await axios.delete(
@@ -403,7 +517,6 @@ const Messages = () => {
         { withCredentials: true, headers: headers }
       );
       toast.success("Trade cancelled");
-      navigate("/messages");
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to cancel trade");
     }

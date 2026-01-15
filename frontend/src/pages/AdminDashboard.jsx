@@ -35,7 +35,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Shield, Trash2, ArrowUp, ArrowDown, Search, Users, Package, MessageSquare, ArrowLeftRight, AlertTriangle, ChevronDown } from "lucide-react";
+import { Loader2, Shield, Trash2, ArrowUp, ArrowDown, Search, Users, Package, MessageSquare, ArrowLeftRight, AlertTriangle, ChevronDown, Bug, Check } from "lucide-react";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -71,6 +71,10 @@ const AdminDashboard = () => {
   const [messagesPage, setMessagesPage] = useState(0);
   const [messagesTotal, setMessagesTotal] = useState(0);
   const messagesLimit = 50;
+  
+  // Bug Reports
+  const [bugReports, setBugReports] = useState([]);
+  const [validatingBugId, setValidatingBugId] = useState(null);
   
   // Database reset
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
@@ -187,6 +191,38 @@ const AdminDashboard = () => {
     }
   }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
+  const fetchBugReports = useCallback(async () => {
+    try {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API}/admin/bug-reports`, {
+        withCredentials: true,
+        headers: headers
+      });
+      setBugReports(response.data);
+    } catch (error) {
+      console.error("Failed to fetch bug reports:", error);
+    }
+  }, [API]);
+
+  const handleValidateBug = async (bugId) => {
+    setValidatingBugId(bugId);
+    try {
+      const headers = getAuthHeaders();
+      await axios.post(
+        `${API}/admin/bug-reports/${bugId}/validate`,
+        {},
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Bug validated and trade points awarded!");
+      fetchBugReports();
+      fetchStats(); // Refresh stats to show updated trade points
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to validate bug");
+    } finally {
+      setValidatingBugId(null);
+    }
+  };
+
   const fetchMessages = useCallback(async (page = 0) => {
     try {
       const headers = getAuthHeaders();
@@ -222,8 +258,10 @@ const AdminDashboard = () => {
       fetchTrades();
     } else if (activeTab === "messages") {
       fetchMessages(0);
+    } else if (activeTab === "bugs") {
+      fetchBugReports();
     }
-  }, [activeTab, fetchUsers, fetchItems, fetchCategories, fetchTrades, fetchMessages]);
+  }, [activeTab, fetchUsers, fetchItems, fetchCategories, fetchTrades, fetchMessages, fetchBugReports]);
 
   const handlePromoteUser = async (userId) => {
     try {
@@ -512,7 +550,20 @@ const AdminDashboard = () => {
                       </TableCell>
                       <TableCell>
                         {u.last_active
-                          ? new Date(u.last_active).toLocaleDateString()
+                          ? (() => {
+                              const lastActive = new Date(u.last_active);
+                              const now = new Date();
+                              const diffMs = now - lastActive;
+                              const diffHours = diffMs / (1000 * 60 * 60);
+                              
+                              if (diffHours < 24) {
+                                // Show time if less than 24 hours
+                                return lastActive.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                              } else {
+                                // Show date if 24 hours or more
+                                return lastActive.toLocaleDateString();
+                              }
+                            })()
                           : "-"}
                       </TableCell>
                       <TableCell>
@@ -769,6 +820,79 @@ const AdminDashboard = () => {
                 </Button>
               </div>
             </div>
+          </TabsContent>
+
+          {/* Bug Reports Tab */}
+          <TabsContent value="bugs" className="space-y-4">
+            <div className="border rounded-lg">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Reporter</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Steps to Reproduce</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {bugReports.map((bug) => (
+                    <TableRow key={bug.bug_id}>
+                      <TableCell className="font-medium">{bug.title}</TableCell>
+                      <TableCell>
+                        {bug.user?.username || bug.user?.name || bug.user?.email || "Unknown"}
+                      </TableCell>
+                      <TableCell className="max-w-md">
+                        <p className="text-sm line-clamp-2">{bug.description}</p>
+                      </TableCell>
+                      <TableCell className="max-w-md">
+                        <p className="text-sm font-mono line-clamp-3 whitespace-pre-wrap">{bug.steps_to_reproduce}</p>
+                      </TableCell>
+                      <TableCell>
+                        {bug.is_valid ? (
+                          <Badge variant="default" className="bg-green-600">
+                            Valid
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">Pending</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {new Date(bug.created_at).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>
+                        {!bug.is_valid ? (
+                          <Button
+                            size="sm"
+                            onClick={() => handleValidateBug(bug.bug_id)}
+                            disabled={validatingBugId === bug.bug_id}
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            {validatingBugId === bug.bug_id ? (
+                              <Loader2 className="w-4 h-4 mr-2 spinner" />
+                            ) : (
+                              <Check className="w-4 h-4 mr-2" />
+                            )}
+                            Mark Valid
+                          </Button>
+                        ) : (
+                          <span className="text-sm text-slate-500">
+                            Validated by {bug.validator?.username || bug.validator?.name || "Admin"}
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {bugReports.length === 0 && (
+              <div className="text-center py-8 text-slate-500">
+                No bug reports yet
+              </div>
+            )}
           </TabsContent>
         </Tabs>
 

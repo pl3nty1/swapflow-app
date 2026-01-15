@@ -187,12 +187,30 @@ class TradeCreate(BaseModel):
 class RatingCreate(BaseModel):
     rating: int
 
+class BugReport(BaseModel):
+    bug_id: str = Field(default_factory=lambda: f"bug_{uuid.uuid4().hex[:12]}")
+    user_id: str
+    title: str
+    description: str
+    steps_to_reproduce: str
+    is_valid: bool = False
+    is_resolved: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    validated_at: Optional[datetime] = None
+    validated_by: Optional[str] = None
+
+class BugReportCreate(BaseModel):
+    title: str
+    description: str
+    steps_to_reproduce: str
+
 class Notification(BaseModel):
     notification_id: str = Field(default_factory=lambda: f"notif_{uuid.uuid4().hex[:12]}")
     user_id: str
     type: str  # e.g., "trade_cancelled", "item_deleted", etc.
     message: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    read_at: Optional[datetime] = None
     data: Optional[dict] = None  # Optional JSON for additional context
 
 # ============== AUTH HELPERS ==============
@@ -955,8 +973,11 @@ async def get_notifications(user: User = Depends(get_current_user)):
 
 @api_router.get("/notifications/count")
 async def get_notification_count(user: User = Depends(get_current_user)):
-    """Get notification count for current user"""
-    count = await db.notifications.count_documents({"user_id": user.user_id})
+    """Get unread notification count for current user"""
+    count = await db.notifications.count_documents({
+        "user_id": user.user_id,
+        "read_at": None
+    })
     return {"count": count}
 
 @api_router.post("/notifications/{notification_id}/dismiss")
@@ -1272,6 +1293,19 @@ async def cancel_trade(trade_id: str, user: User = Depends(get_current_user)):
         }}
     )
     
+    # Notify the other party
+    other_user_id = trade["trader_id"] if trade["owner_id"] == user.user_id else trade["owner_id"]
+    other_user = await db.users.find_one({"user_id": other_user_id}, {"_id": 0})
+    other_user_name = other_user.get("username") or other_user.get("name", "Someone") if other_user else "Someone"
+    cancelling_user_name = user.get("username") or user.get("name", "Someone")
+    
+    await create_and_send_notification(
+        user_id=other_user_id,
+        notification_type="trade_cancelled",
+        message=f"{cancelling_user_name} cancelled the trade",
+        data={"trade_id": trade_id}
+    )
+    
     updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
     return {"message": "Trade cancelled", "trade": updated_trade}
 
@@ -1310,6 +1344,22 @@ async def confirm_trade(trade_id: str, user: User = Depends(get_current_user)):
     updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
     updated_trade = await migrate_trade_to_array_format(updated_trade)
     
+    # Notify the other party that this party confirmed
+    other_user_id = trade["trader_id"] if update_field == "owner_confirmed" else trade["owner_id"]
+    other_user = await db.users.find_one({"user_id": other_user_id}, {"_id": 0})
+    other_user_name = other_user.get("username") or other_user.get("name", "Someone") if other_user else "Someone"
+    confirming_user_name = user.get("username") or user.get("name", "Someone")
+    
+    # If only one party confirmed, notify the other
+    if (update_field == "owner_confirmed" and not updated_trade.get("trader_confirmed")) or \
+       (update_field == "trader_confirmed" and not updated_trade.get("owner_confirmed")):
+        await create_and_send_notification(
+            user_id=other_user_id,
+            notification_type="trade_confirmed",
+            message=f"{confirming_user_name} confirmed the trade",
+            data={"trade_id": trade_id}
+        )
+    
     if updated_trade["owner_confirmed"] and updated_trade["trader_confirmed"]:
         # Complete the trade
         completed_at = datetime.now(timezone.utc)
@@ -1338,6 +1388,26 @@ async def confirm_trade(trade_id: str, user: User = Depends(get_current_user)):
         await db.messages.update_many(
             {"trade_id": trade_id},
             {"$set": {"expires_at": expires_at.isoformat()}}
+        )
+        
+        # Notify both parties that trade is completed
+        owner_user = await db.users.find_one({"user_id": trade["owner_id"]}, {"_id": 0})
+        trader_user = await db.users.find_one({"user_id": trade["trader_id"]}, {"_id": 0})
+        owner_name = owner_user.get("username") or owner_user.get("name", "Someone") if owner_user else "Someone"
+        trader_name = trader_user.get("username") or trader_user.get("name", "Someone") if trader_user else "Someone"
+        
+        await create_and_send_notification(
+            user_id=trade["owner_id"],
+            notification_type="trade_completed",
+            message=f"Trade with {trader_name} completed! You earned 1 trade point.",
+            data={"trade_id": trade_id}
+        )
+        
+        await create_and_send_notification(
+            user_id=trade["trader_id"],
+            notification_type="trade_completed",
+            message=f"Trade with {owner_name} completed! You earned 1 trade point.",
+            data={"trade_id": trade_id}
         )
         
         updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
@@ -1428,7 +1498,26 @@ async def add_items_to_trade(trade_id: str, item_data: dict, user: User = Depend
         
         return updated_trade
     else:
-        # Add directly to trade (own side)
+        # Add directly to trade (own side) - notify the other party
+        other_user_id = trade["owner_id"] if side == "trader" else trade["trader_id"]
+        item_titles = []
+        for item_id in item_ids:
+            item = await db.items.find_one({"item_id": item_id}, {"_id": 0})
+            if item:
+                item_titles.append(item.get("title", item_id))
+        
+        items_text = ", ".join(item_titles[:2])
+        if len(item_titles) > 2:
+            items_text += f" and {len(item_titles) - 2} more"
+        
+        adding_user_name = user.get("username") or user.get("name", "Someone")
+        await create_and_send_notification(
+            user_id=other_user_id,
+            notification_type="item_added",
+            message=f"{adding_user_name} added {items_text} to the trade",
+            data={"trade_id": trade_id, "item_ids": item_ids}
+        )
+        
         await db.trades.update_one(
             {"trade_id": trade_id},
             {"$push": {f"{side}_item_ids": {"$each": item_ids}}}
@@ -1438,7 +1527,6 @@ async def add_items_to_trade(trade_id: str, item_data: dict, user: User = Depend
         updated_trade = await migrate_trade_to_array_format(updated_trade)
         
         # Broadcast trade update via WebSocket
-        other_user_id = trade["owner_id"] if side == "trader" else trade["trader_id"]
         broadcast_data = {
             "type": "trade_updated",
             "trade_id": trade_id
@@ -1497,11 +1585,23 @@ async def remove_item_from_trade(trade_id: str, item_id: str, user: User = Depen
         {"$pull": {f"pending_{side}_items": item_id}}
     )
     
+    # Notify the other party
+    other_user_id = trade["owner_id"] if side == "trader" else trade["trader_id"]
+    item = await db.items.find_one({"item_id": item_id}, {"_id": 0})
+    item_title = item.get("title", "an item") if item else "an item"
+    removing_user_name = user.get("username") or user.get("name", "Someone")
+    
+    await create_and_send_notification(
+        user_id=other_user_id,
+        notification_type="item_removed",
+        message=f"{removing_user_name} removed {item_title} from the trade",
+        data={"trade_id": trade_id, "item_id": item_id}
+    )
+    
     updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
     updated_trade = await migrate_trade_to_array_format(updated_trade)
     
     # Broadcast trade update via WebSocket
-    other_user_id = trade["owner_id"] if side == "trader" else trade["trader_id"]
     broadcast_data = {
         "type": "trade_updated",
         "trade_id": trade_id
@@ -1658,6 +1758,21 @@ async def respond_to_item_request(trade_id: str, request_id: str, response_data:
             {"$push": {f"{side}_item_ids": item_id}}
         )
         
+        # Notify requester that request was accepted
+        requester_id = request_message["sender_id"]
+        requester_user = await db.users.find_one({"user_id": requester_id}, {"_id": 0})
+        requester_name = requester_user.get("username") or requester_user.get("name", "Someone") if requester_user else "Someone"
+        item = await db.items.find_one({"item_id": item_id}, {"_id": 0})
+        item_title = item.get("title", "an item") if item else "an item"
+        responder_name = user.get("username") or user.get("name", "Someone")
+        
+        await create_and_send_notification(
+            user_id=requester_id,
+            notification_type="item_request_accepted",
+            message=f"{responder_name} accepted your request to add {item_title} to the trade",
+            data={"trade_id": trade_id, "item_id": item_id, "request_id": request_id}
+        )
+        
         # Remove from pending if it's there
         await db.trades.update_one(
             {"trade_id": trade_id},
@@ -1765,6 +1880,94 @@ async def rate_trade(trade_id: str, rating_data: RatingCreate, user: User = Depe
     )
     
     return {"message": "Rating submitted", "rating": rating_data.rating}
+
+# ============== BUG REPORT ENDPOINTS ==============
+
+@api_router.post("/bug-reports")
+async def create_bug_report(bug_data: BugReportCreate, user: User = Depends(get_current_user)):
+    """Create a bug report"""
+    bug_report = BugReport(
+        user_id=user.user_id,
+        title=bug_data.title,
+        description=bug_data.description,
+        steps_to_reproduce=bug_data.steps_to_reproduce
+    )
+    
+    bug_dict = bug_report.model_dump()
+    bug_dict["created_at"] = bug_dict["created_at"].isoformat()
+    
+    await db.bug_reports.insert_one(bug_dict.copy())
+    
+    return bug_dict
+
+@api_router.get("/admin/bug-reports")
+async def admin_get_bug_reports(admin: User = Depends(get_admin_user)):
+    """Get all bug reports (admin only)"""
+    bugs = await db.bug_reports.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    # Get user info for each bug report
+    user_ids = list(set(bug["user_id"] for bug in bugs))
+    users_dict = {}
+    if user_ids:
+        users_cursor = db.users.find({"user_id": {"$in": user_ids}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "username": 1})
+        async for user_doc in users_cursor:
+            users_dict[user_doc["user_id"]] = user_doc
+    
+    # Get validator info
+    validator_ids = list(set(bug.get("validated_by") for bug in bugs if bug.get("validated_by")))
+    validators_dict = {}
+    if validator_ids:
+        validators_cursor = db.users.find({"user_id": {"$in": validator_ids}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "username": 1})
+        async for validator_doc in validators_cursor:
+            validators_dict[validator_doc["user_id"]] = validator_doc
+    
+    result = []
+    for bug in bugs:
+        result.append({
+            **bug,
+            "user": users_dict.get(bug["user_id"]),
+            "validator": validators_dict.get(bug.get("validated_by")) if bug.get("validated_by") else None
+        })
+    
+    return result
+
+@api_router.post("/admin/bug-reports/{bug_id}/validate")
+async def admin_validate_bug_report(bug_id: str, admin: User = Depends(get_admin_user)):
+    """Mark a bug report as valid and award trade points to the reporter"""
+    bug = await db.bug_reports.find_one({"bug_id": bug_id}, {"_id": 0})
+    if not bug:
+        raise HTTPException(status_code=404, detail="Bug report not found")
+    
+    if bug.get("is_valid"):
+        raise HTTPException(status_code=400, detail="Bug report already validated")
+    
+    validated_at = datetime.now(timezone.utc)
+    
+    # Mark bug as valid
+    await db.bug_reports.update_one(
+        {"bug_id": bug_id},
+        {"$set": {
+            "is_valid": True,
+            "validated_at": validated_at.isoformat(),
+            "validated_by": admin.user_id
+        }}
+    )
+    
+    # Award trade points to the reporter
+    await db.users.update_one(
+        {"user_id": bug["user_id"]},
+        {"$inc": {"trade_points": 1}}
+    )
+    
+    # Create notification for the reporter
+    await create_and_send_notification(
+        user_id=bug["user_id"],
+        notification_type="bug_validated",
+        message=f"Your bug report '{bug['title']}' was marked as valid! You earned 1 trade point.",
+        data={"bug_id": bug_id, "trade_points_awarded": 1}
+    )
+    
+    return {"message": "Bug report validated and trade points awarded"}
 
 # ============== FILE UPLOAD ==============
 

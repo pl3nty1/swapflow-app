@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "@/App";
+import { usePreloadCache } from "@/contexts/PreloadContext";
 import { Header } from "@/components/Header";
 import { DisplayRating } from "@/components/StarRating";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -23,6 +24,7 @@ const ItemDetail = () => {
   const { itemId } = useParams();
   const navigate = useNavigate();
   const { user, API, getAuthHeaders } = useAuth();
+  const { getCachedItem, setCachedItem } = usePreloadCache();
   const [item, setItem] = useState(null);
   const [owner, setOwner] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -36,19 +38,62 @@ const ItemDetail = () => {
 
   const isOwner = user?.user_id === item?.user_id;
 
-  const fetchItem = useCallback(async () => {
+  const fetchItem = useCallback(async (showCached = true) => {
+    // Check cache first and show immediately
+    if (showCached) {
+      const cached = getCachedItem(itemId);
+      if (cached) {
+        setItem(cached.item);
+        setOwner(cached.owner);
+        setIsLoading(false);
+        
+        // Fetch preferred items if desired_item_ids exist
+        if (cached.item.desired_item_ids && cached.item.desired_item_ids.length > 0) {
+          // Preferred items can be fetched in background
+        }
+        // Continue to fetch fresh data in background
+      }
+    }
+
     try {
       const response = await axios.get(`${API}/items/${itemId}`, { withCredentials: true });
-      setItem(response.data.item);
-      setOwner(response.data.owner);
+      const freshItem = response.data.item;
+      const freshOwner = response.data.owner;
+      
+      // Check for desync: compare cached vs fresh
+      if (showCached) {
+        const cached = getCachedItem(itemId);
+        if (cached) {
+          // Check if item has changed
+          const hasChanged = JSON.stringify(cached.item) !== JSON.stringify(freshItem) ||
+                            JSON.stringify(cached.owner) !== JSON.stringify(freshOwner);
+          
+          // Only update if there's a desync
+          if (hasChanged) {
+            setItem(freshItem);
+            setOwner(freshOwner);
+          }
+        } else {
+          // No cache, set fresh data
+          setItem(freshItem);
+          setOwner(freshOwner);
+        }
+      } else {
+        // Not showing cached, set fresh data directly
+        setItem(freshItem);
+        setOwner(freshOwner);
+      }
+      
+      // Update cache with fresh data
+      setCachedItem(itemId, freshItem, freshOwner);
       
       // Fetch preferred items if desired_item_ids exist
-      if (response.data.item.desired_item_ids && response.data.item.desired_item_ids.length > 0) {
+      if (freshItem.desired_item_ids && freshItem.desired_item_ids.length > 0) {
         try {
           const itemsResponse = await axios.get(`${API}/items`, { withCredentials: true });
-          const allItems = itemsResponse.data.items || [];
+          const allItems = itemsResponse.data.items || itemsResponse.data || [];
           const preferred = allItems.filter((i) =>
-            response.data.item.desired_item_ids.includes(i.item_id)
+            freshItem.desired_item_ids.includes(i.item_id)
           );
           setPreferredItems(preferred);
         } catch (error) {
@@ -57,12 +102,15 @@ const ItemDetail = () => {
       }
     } catch (error) {
       console.error("Failed to fetch item:", error);
-      toast.error("Item not found");
-      navigate("/dashboard");
+      // If we showed cached data and fetch failed, keep showing cached
+      if (!showCached) {
+        toast.error("Item not found");
+        navigate("/dashboard");
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [API, itemId, navigate]);
+  }, [API, itemId, navigate, getCachedItem, setCachedItem]);
 
   useEffect(() => {
     fetchItem();
@@ -114,7 +162,12 @@ const ItemDetail = () => {
       return;
     }
 
+    // OPTIMISTIC UPDATE: Navigate immediately
+    setIsTradeOpen(false);
+    setSelectedItemIds([]);
+    navigate("/trades");
     setIsCreatingTrade(true);
+    
     try {
       const headers = getAuthHeaders();
 
@@ -129,10 +182,7 @@ const ItemDetail = () => {
           headers: headers
         }
       );
-      toast.success("Trade initiated! Check your trades page.");
-      setIsTradeOpen(false);
-      setSelectedItemIds([]);
-      navigate("/trades");
+      toast.success("Trade initiated!");
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to start trade");
     } finally {

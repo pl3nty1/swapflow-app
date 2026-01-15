@@ -11,6 +11,11 @@ export const usePreloadCache = () => {
     getCachedCategories: () => null,
     getCachedNotifications: () => null,
     getCachedUnreadCount: () => null,
+    getCachedItem: () => null,
+    setCachedItem: () => {},
+    getCachedItemList: () => null,
+    setCachedItemList: () => {},
+    invalidateItemCache: () => {},
     invalidateCache: () => {}
   };
 };

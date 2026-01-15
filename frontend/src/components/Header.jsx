@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ArrowLeftRight, Plus, MessageCircle, User, LogOut, Package, Shield, Bell, X } from "lucide-react";
+import { ArrowLeftRight, Plus, MessageCircle, User, LogOut, Package, Shield, Bell } from "lucide-react";
 
 export const Header = () => {
   const { user, logout, API, getAuthHeaders } = useAuth();
@@ -88,7 +88,7 @@ export const Header = () => {
     const cached = getCachedNotifications();
     if (cached) {
       setNotifications(cached);
-      setNotificationCount(cached.filter(n => !n.dismissed_at).length);
+      setNotificationCount(cached.filter(n => !n.read_at).length);
       // Still fetch in background to update
     }
 
@@ -99,11 +99,31 @@ export const Header = () => {
         headers: headers
       });
       setNotifications(response.data);
-      setNotificationCount(response.data.filter(n => !n.dismissed_at).length);
+      setNotificationCount(response.data.filter(n => !n.read_at).length);
     } catch (error) {
       console.error("Failed to fetch notifications:", error);
     }
   }, [user, API, getCachedNotifications]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  
+  // Mark all notifications as read when bell is clicked
+  const handleBellClick = useCallback(async () => {
+    if (notificationCount === 0) return; // No unread notifications
+    
+    try {
+      const headers = getAuthHeaders();
+      await axios.post(`${API}/notifications/mark-read`, {}, {
+        withCredentials: true,
+        headers: headers
+      });
+      // Update local state
+      setNotifications((prev) => 
+        prev.map(n => n.read_at ? n : { ...n, read_at: new Date().toISOString() })
+      );
+      setNotificationCount(0);
+    } catch (error) {
+      console.error("Failed to mark notifications as read:", error);
+    }
+  }, [API, notificationCount]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   // WebSocket connection for notifications
   useEffect(() => {
@@ -160,19 +180,6 @@ export const Header = () => {
     };
   }, [user, API, fetchNotifications]);
 
-  const handleDismissNotification = async (notificationId) => {
-    try {
-      const headers = getAuthHeaders();
-      await axios.post(`${API}/notifications/${notificationId}/dismiss`, {}, {
-        withCredentials: true,
-        headers: headers
-      });
-      setNotifications((prev) => prev.filter((n) => n.notification_id !== notificationId));
-      setNotificationCount((prev) => Math.max(0, prev - 1));
-    } catch (error) {
-      console.error("Failed to dismiss notification:", error);
-    }
-  };
 
   const formatTimeAgo = (dateStr) => {
     const date = new Date(dateStr);
@@ -244,7 +251,11 @@ export const Header = () => {
             </Button>
 
             {/* Notifications */}
-            <DropdownMenu>
+            <DropdownMenu onOpenChange={(open) => {
+              if (open) {
+                handleBellClick(); // Mark as read when opening dropdown
+              }
+            }}>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
@@ -276,23 +287,17 @@ export const Header = () => {
                       {notifications.map((notification) => (
                         <div
                           key={notification.notification_id}
-                          className="px-4 py-3 hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
+                          className={`px-4 py-3 hover:bg-slate-50 border-b border-slate-100 last:border-b-0 ${
+                            !notification.read_at ? 'bg-indigo-50/50' : ''
+                          }`}
                         >
-                          <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2">
                             <div className="flex-1 min-w-0">
                               <p className="text-sm text-slate-900">{notification.message}</p>
                               <p className="text-xs text-slate-500 mt-1">
                                 {formatTimeAgo(notification.created_at)}
                               </p>
                             </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 flex-shrink-0"
-                              onClick={() => handleDismissNotification(notification.notification_id)}
-                            >
-                              <X className="w-3 h-3" />
-                            </Button>
                           </div>
                         </div>
                       ))}

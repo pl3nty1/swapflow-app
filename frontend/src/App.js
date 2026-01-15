@@ -5,6 +5,7 @@ import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
 import { usePreload } from "@/hooks/usePreload";
 import { PreloadContext } from "@/contexts/PreloadContext";
+import { BugReportButton } from "@/components/BugReportButton";
 
 // Pages
 import Landing from "@/pages/Landing";
@@ -309,6 +310,7 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <AppRouter />
+        <BugReportButton />
         <Toaster position="top-right" richColors />
       </AuthProvider>
     </BrowserRouter>

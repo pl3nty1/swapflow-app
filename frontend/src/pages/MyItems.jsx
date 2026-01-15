@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "@/App";
+import { usePreloadCache } from "@/contexts/PreloadContext";
 import { Header } from "@/components/Header";
 import { ItemCard } from "@/components/ItemCard";
 import { Button } from "@/components/ui/button";
@@ -21,25 +22,73 @@ import { Loader2, Plus, Trash2 } from "lucide-react";
 const MyItems = () => {
   const navigate = useNavigate();
   const { user, API, getAuthHeaders } = useAuth();
+  const { getCachedItemList, setCachedItemList, invalidateItemCache } = usePreloadCache();
   const [items, setItems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingItemId, setDeletingItemId] = useState(null);
   const [deleteDialog, setDeleteDialog] = useState({ isOpen: false, itemId: null });
 
-  const fetchItems = useCallback(async () => {
+  const fetchItems = useCallback(async (showCached = true) => {
+    const params = { user_id: user?.user_id };
+    
+    // Check cache first and show immediately
+    if (showCached) {
+      const cached = getCachedItemList(params);
+      if (cached && cached.length >= 0) {
+        setItems(cached);
+        setIsLoading(false);
+        // Continue to fetch fresh data in background
+      }
+    }
+
     try {
       const headers = getAuthHeaders();
       const response = await axios.get(`${API}/my-items`, { 
         withCredentials: true,
         headers: headers
       });
-      setItems(response.data);
+      const freshItems = response.data;
+      
+      // Check for desync: compare cached vs fresh
+      if (showCached) {
+        const cached = getCachedItemList(params);
+        if (cached) {
+          const cachedIds = new Set(cached.map(i => i.item_id));
+          const freshIds = new Set(freshItems.map(i => i.item_id));
+          
+          // Check if there are differences
+          const hasNewItems = freshItems.some(i => !cachedIds.has(i.item_id));
+          const hasRemovedItems = cached.some(i => !freshIds.has(i.item_id));
+          const hasUpdatedItems = cached.some(cachedItem => {
+            const freshItem = freshItems.find(f => f.item_id === cachedItem.item_id);
+            return freshItem && JSON.stringify(cachedItem) !== JSON.stringify(freshItem);
+          });
+          
+          // Only update if there's a desync
+          if (hasNewItems || hasRemovedItems || hasUpdatedItems) {
+            setItems(freshItems);
+          }
+        } else {
+          // No cache, set fresh data
+          setItems(freshItems);
+        }
+      } else {
+        // Not showing cached, set fresh data directly
+        setItems(freshItems);
+      }
+      
+      // Update cache with fresh data
+      setCachedItemList(params, freshItems);
     } catch (error) {
       console.error("Failed to fetch items:", error);
+      // If we showed cached data and fetch failed, keep showing cached
+      if (!showCached) {
+        setIsLoading(false);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, user?.user_id, getCachedItemList, setCachedItemList]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   useEffect(() => {
     fetchItems();
@@ -52,17 +101,27 @@ const MyItems = () => {
   const handleDeleteConfirm = async () => {
     if (!deleteDialog.itemId) return;
     
-    setDeletingItemId(deleteDialog.itemId);
+    const itemIdToDelete = deleteDialog.itemId;
+    
+    // OPTIMISTIC UPDATE: Remove item from UI immediately
+    setItems(prev => prev.filter(item => item.item_id !== itemIdToDelete));
+    setDeleteDialog({ isOpen: false, itemId: null });
+    setDeletingItemId(itemIdToDelete);
+    
+    // Invalidate cache for this item
+    invalidateItemCache(itemIdToDelete);
+    
     try {
       const headers = getAuthHeaders();
-      await axios.delete(`${API}/items/${deleteDialog.itemId}`, {
+      await axios.delete(`${API}/items/${itemIdToDelete}`, {
         withCredentials: true,
         headers: headers
       });
+      // Don't call fetchItems() - already updated optimistically
       toast.success("Item deleted");
-      setDeleteDialog({ isOpen: false, itemId: null });
-      fetchItems(); // Refresh the list
     } catch (error) {
+      // Rollback on error
+      fetchItems(false); // Force fresh fetch
       toast.error(error.response?.data?.detail || "Failed to delete item");
     } finally {
       setDeletingItemId(null);
