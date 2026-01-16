@@ -83,15 +83,17 @@ const Messages = () => {
 
   useWebSocket(["trades"], handleWebSocketMessage);
 
-  // Initial data loading
+  // Initial data loading - load from cache immediately
   useEffect(() => {
-    fetchConversations();
+    // Load from cache first (instant), then refresh in background
+    fetchConversations(false); // false = use cache if available
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
   useEffect(() => {
     if (tradeId) {
-      Promise.all([fetchMessages(), fetchTrade()]).catch((error) => {
+      // Load messages from cache first (instant), then refresh in background
+      Promise.all([fetchMessages(tradeId, false), fetchTrade()]).catch((error) => {
         if (error.response?.status === 404) {
           toast.error("Trade not found");
           navigate("/messages");
@@ -236,7 +238,9 @@ const Messages = () => {
     }
   };
 
-  const isLoading = chatLoading || tradeLoading;
+  // Only show loading spinner if we're loading AND have no conversations (first load)
+  // If we have cached conversations, show them immediately even if refreshing
+  const isLoading = (chatLoading && conversations.length === 0) || (tradeLoading && tradeId);
 
   if (isLoading) {
     return (

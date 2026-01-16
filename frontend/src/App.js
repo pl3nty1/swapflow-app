@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
 import { usePreload } from "@/hooks/usePreload";
 import { PreloadContext } from "@/contexts/PreloadContext";
+import { WebSocketProvider } from "@/contexts/WebSocketContext";
 import { BugReportButton } from "@/components/BugReportButton";
 
 // Pages
@@ -57,52 +58,14 @@ export const useAuth = () => {
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
   const navigate = useNavigate();
-  const { user, setUser, isLoading, setIsLoading } = useAuth();
+  const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    // If we already have user, skip
-    if (user) {
-      setIsLoading(false);
-      return;
+    // Wait for auth check to complete, then redirect if not authenticated
+    if (!isLoading && !user) {
+      navigate("/", { replace: true });
     }
-
-    const checkAuth = async () => {
-      if (!API) {
-        console.error('API URL not configured');
-        setIsLoading(false);
-        navigate("/", { replace: true });
-        return;
-      }
-
-      try {
-        // Get session token from localStorage as fallback
-        const sessionToken = localStorage.getItem('session_token');
-        const headers = {};
-        if (sessionToken) {
-          headers['Authorization'] = `Bearer ${sessionToken}`;
-        }
-
-        const response = await axios.get(`${API}/auth/me`, { 
-          withCredentials: true,
-          headers: headers,
-          timeout: 10000 // 10 second timeout
-        });
-
-        if (response.data) {
-          setUser(response.data);
-        } else {
-          navigate("/", { replace: true });
-        }
-      } catch (error) {
-        console.error('Auth check failed:', error);
-        navigate("/", { replace: true });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    checkAuth();
-  }, [navigate, setUser, user, setIsLoading]); // API is a constant
+  }, [isLoading, user, navigate]);
 
   if (isLoading) {
     return (
@@ -118,58 +81,18 @@ const ProtectedRoute = ({ children }) => {
 // Admin Protected Route Component
 const AdminProtectedRoute = ({ children }) => {
   const navigate = useNavigate();
-  const { user, setUser, isLoading, setIsLoading } = useAuth();
+  const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    // If we already have user, check admin status
-    if (user) {
-      if (!user.is_admin) {
+    // Wait for auth check to complete
+    if (!isLoading) {
+      if (!user) {
+        navigate("/", { replace: true });
+      } else if (!user.is_admin) {
         navigate("/dashboard", { replace: true });
       }
-      setIsLoading(false);
-      return;
     }
-
-    const checkAuth = async () => {
-      if (!API) {
-        console.error('API URL not configured');
-        setIsLoading(false);
-        navigate("/", { replace: true });
-        return;
-      }
-
-      try {
-        // Get session token from localStorage as fallback
-        const sessionToken = localStorage.getItem('session_token');
-        const headers = {};
-        if (sessionToken) {
-          headers['Authorization'] = `Bearer ${sessionToken}`;
-        }
-
-        const response = await axios.get(`${API}/auth/me`, { 
-          withCredentials: true,
-          headers: headers,
-          timeout: 10000 // 10 second timeout
-        });
-
-        if (response.data) {
-          setUser(response.data);
-          if (!response.data.is_admin) {
-            navigate("/dashboard", { replace: true });
-          }
-        } else {
-          navigate("/", { replace: true });
-        }
-      } catch (error) {
-        console.error('Auth check failed:', error);
-        navigate("/", { replace: true });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    checkAuth();
-  }, [navigate, setUser, user, setIsLoading]); // API is a constant
+  }, [isLoading, user, navigate]);
 
   if (isLoading) {
     return (
@@ -277,6 +200,45 @@ const getAuthHeaders = () => {
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const authCheckedRef = useRef(false);
+
+  // Check auth once on mount
+  useEffect(() => {
+    if (authCheckedRef.current) return;
+    
+    const checkAuth = async () => {
+      if (!API) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const sessionToken = localStorage.getItem('session_token');
+        const headers = {};
+        if (sessionToken) {
+          headers['Authorization'] = `Bearer ${sessionToken}`;
+        }
+
+        const response = await axios.get(`${API}/auth/me`, { 
+          withCredentials: true,
+          headers: headers,
+          timeout: 5000
+        });
+
+        if (response.data) {
+          setUser(response.data);
+        }
+      } catch (error) {
+        // Silently fail - user is not authenticated
+        console.debug('Auth check failed (user not logged in):', error.message);
+      } finally {
+        setIsLoading(false);
+        authCheckedRef.current = true;
+      }
+    };
+
+    checkAuth();
+  }, [API]);
 
   const logout = async () => {
     try {
@@ -290,6 +252,7 @@ function AuthProvider({ children }) {
     } finally {
       setUser(null);
       localStorage.removeItem('session_token');
+      authCheckedRef.current = false;
     }
   };
 
@@ -309,9 +272,11 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRouter />
-        <BugReportButton />
-        <Toaster position="top-right" richColors />
+        <WebSocketProvider>
+          <AppRouter />
+          <BugReportButton />
+          <Toaster position="top-right" richColors />
+        </WebSocketProvider>
       </AuthProvider>
     </BrowserRouter>
   );

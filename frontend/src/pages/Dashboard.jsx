@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import axios from "axios";
 import { useAuth } from "@/App";
 import { usePreloadCache } from "@/contexts/PreloadContext";
@@ -10,140 +10,194 @@ import { Search, Loader2 } from "lucide-react";
 
 const Dashboard = () => {
   const { API } = useAuth();
-  const { getCachedItems, getCachedCategories, getCachedItemList, setCachedItemList } = usePreloadCache();
+  const { getCachedItemList, setCachedItemList, getCachedItemListMetadata, updateCachedItemList } = usePreloadCache();
   const [allItems, setAllItems] = useState([]); // Store all items for client-side filtering
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false); // Start with false - use cache immediately
   const [owners, setOwners] = useState({});
+  const syncInProgressRef = useRef(false);
+  const lastSyncRef = useRef(0);
 
-  const fetchItems = useCallback(async (showCached = true) => {
-    // Always fetch ALL items (no category filter) for client-side filtering
-    const params = { include_owners: true };
-    
-    // Check cache first and show immediately
-    if (showCached) {
-      const cached = getCachedItemList(params);
-      if (cached && cached.length > 0) {
-        setAllItems(cached);
-        const ownerMap = {};
-        cached.forEach((item) => {
-          if (item.owner) {
-            ownerMap[item.owner.user_id] = item.owner;
-          }
-        });
-        setOwners(ownerMap);
-        setIsLoading(false);
-        // Extract categories from cached items
-        const categorySet = new Set(cached.map(item => item.category).filter(Boolean));
-        const categoryList = Array.from(categorySet).map(name => ({ name })).sort((a, b) => a.name.localeCompare(b.name));
-        setCategories(categoryList);
-        // Continue to fetch fresh data in background
+  // Helper to process items and extract data (frontloaded computation)
+  const processItems = useCallback((items) => {
+    const ownerMap = {};
+    items.forEach((item) => {
+      if (item.owner) {
+        ownerMap[item.owner.user_id] = item.owner;
       }
+    });
+    const categorySet = new Set(items.map(item => item.category).filter(Boolean));
+    const categoryList = Array.from(categorySet).map(name => ({ name })).sort((a, b) => a.name.localeCompare(b.name));
+    return { ownerMap, categoryList };
+  }, []);
+
+  // Lightweight sync check - only fetch IDs to see what changed
+  const syncItems = useCallback(async () => {
+    if (syncInProgressRef.current) return;
+    
+    const params = { include_owners: true, limit: 100 };
+    const cacheMeta = getCachedItemListMetadata(params);
+    
+    // If no cache or cache is very fresh (< 30s), skip sync
+    if (!cacheMeta || (Date.now() - cacheMeta.lastSync < 30000)) {
+      return;
     }
 
+    syncInProgressRef.current = true;
+    try {
+      // Lightweight sync: just get IDs
+      const syncResponse = await axios.get(`${API}/items/sync`, {
+        params: { cached_ids: cacheMeta.itemIds },
+        withCredentials: true
+      });
+
+      const { item_ids, removed_ids } = syncResponse.data;
+      const cachedIds = new Set(cacheMeta.items.map(i => i.item_id));
+      const currentIds = new Set(item_ids);
+      
+      // Find new/changed items (items in server but not in cache)
+      const newItemIds = item_ids.filter(id => !cachedIds.has(id));
+      
+      if (newItemIds.length > 0 || removed_ids.length > 0) {
+        // Only fetch the new/changed items
+        if (newItemIds.length > 0) {
+          const newItemsResponse = await axios.get(`${API}/items`, {
+            params: { 
+              item_ids: newItemIds.join(','),
+              include_owners: true 
+            },
+            withCredentials: true
+          });
+          
+          // Incrementally update cache
+          updateCachedItemList(params, newItemsResponse.data, removed_ids);
+          
+          // Update state
+          const updatedCache = getCachedItemList(params);
+          if (updatedCache) {
+            setAllItems(updatedCache);
+            const { ownerMap, categoryList } = processItems(updatedCache);
+            setOwners(ownerMap);
+            setCategories(categoryList);
+          }
+        } else if (removed_ids.length > 0) {
+          // Only removals, update cache
+          updateCachedItemList(params, [], removed_ids);
+          const updatedCache = getCachedItemList(params);
+          if (updatedCache) {
+            setAllItems(updatedCache);
+            const { ownerMap, categoryList } = processItems(updatedCache);
+            setOwners(ownerMap);
+            setCategories(categoryList);
+          }
+        }
+      }
+      
+      lastSyncRef.current = Date.now();
+    } catch (error) {
+      console.error("Sync failed:", error);
+      // Don't block UI on sync failure
+    } finally {
+      syncInProgressRef.current = false;
+    }
+  }, [API, getCachedItemListMetadata, getCachedItemList, updateCachedItemList, processItems]);
+
+  // Full fetch (only when cache is missing or stale)
+  const fetchItems = useCallback(async (forceRefresh = false) => {
+    const params = { include_owners: true, limit: 100 };
+    
+    // Always check cache first - use it if available and fresh
+    const cached = getCachedItemList(params);
+    if (cached && cached.length > 0 && !forceRefresh) {
+      setAllItems(cached);
+      const { ownerMap, categoryList } = processItems(cached);
+      setOwners(ownerMap);
+      setCategories(categoryList);
+      setIsLoading(false);
+      
+      // Do lightweight sync in background if cache is older than 30s
+      if (Date.now() - lastSyncRef.current > 30000) {
+        syncItems();
+      }
+      return; // Exit early - cache is good!
+    }
+
+    // Cache miss or force refresh - fetch full data
+    setIsLoading(true);
     try {
       const response = await axios.get(`${API}/items`, { params, withCredentials: true });
       const freshItems = response.data;
       
-      // Check for desync: compare cached vs fresh
-      if (showCached) {
-        const cached = getCachedItemList(params);
-        if (cached) {
-          const cachedIds = new Set(cached.map(i => i.item_id));
-          const freshIds = new Set(freshItems.map(i => i.item_id));
-          
-          // Check if there are differences
-          const hasNewItems = freshItems.some(i => !cachedIds.has(i.item_id));
-          const hasRemovedItems = cached.some(i => !freshIds.has(i.item_id));
-          const hasUpdatedItems = cached.some(cachedItem => {
-            const freshItem = freshItems.find(f => f.item_id === cachedItem.item_id);
-            return freshItem && JSON.stringify(cachedItem) !== JSON.stringify(freshItem);
-          });
-          
-          // Only update if there's a desync
-          if (hasNewItems || hasRemovedItems || hasUpdatedItems) {
-            setAllItems(freshItems);
-            const ownerMap = {};
-            freshItems.forEach((item) => {
-              if (item.owner) {
-                ownerMap[item.owner.user_id] = item.owner;
-              }
-            });
-            setOwners(ownerMap);
-            // Update categories from fresh items
-            const categorySet = new Set(freshItems.map(item => item.category).filter(Boolean));
-            const categoryList = Array.from(categorySet).map(name => ({ name })).sort((a, b) => a.name.localeCompare(b.name));
-            setCategories(categoryList);
-          }
-        } else {
-          // No cache, set fresh data
-          setAllItems(freshItems);
-          const ownerMap = {};
-          freshItems.forEach((item) => {
-            if (item.owner) {
-              ownerMap[item.owner.user_id] = item.owner;
-            }
-          });
-          setOwners(ownerMap);
-          // Extract categories from fresh items
-          const categorySet = new Set(freshItems.map(item => item.category).filter(Boolean));
-          const categoryList = Array.from(categorySet).map(name => ({ name })).sort((a, b) => a.name.localeCompare(b.name));
-          setCategories(categoryList);
-        }
-      } else {
-        // Not showing cached, set fresh data directly
-        setAllItems(freshItems);
-        const ownerMap = {};
-        freshItems.forEach((item) => {
-          if (item.owner) {
-            ownerMap[item.owner.user_id] = item.owner;
-          }
-        });
-        setOwners(ownerMap);
-        // Extract categories from fresh items
-        const categorySet = new Set(freshItems.map(item => item.category).filter(Boolean));
-        const categoryList = Array.from(categorySet).map(name => ({ name })).sort((a, b) => a.name.localeCompare(b.name));
-        setCategories(categoryList);
-      }
+      setAllItems(freshItems);
+      const { ownerMap, categoryList } = processItems(freshItems);
+      setOwners(ownerMap);
+      setCategories(categoryList);
       
-      // Update cache with fresh data
-      setCachedItemList(params, freshItems);
+      // Update cache
+      setCachedItemList(params, freshItems, Date.now());
+      lastSyncRef.current = Date.now();
     } catch (error) {
       console.error("Failed to fetch items:", error);
-      // If we showed cached data and fetch failed, keep showing cached
-      if (!showCached) {
-        setIsLoading(false);
+      // If we have stale cache, use it
+      if (cached && cached.length > 0) {
+        setAllItems(cached);
+        const { ownerMap, categoryList } = processItems(cached);
+        setOwners(ownerMap);
+        setCategories(categoryList);
       }
     } finally {
       setIsLoading(false);
     }
-  }, [API, getCachedItemList, setCachedItemList]);
+  }, [API, getCachedItemList, setCachedItemList, processItems, syncItems]);
 
+  // Load from cache immediately on mount (no loading state)
   useEffect(() => {
-    fetchItems();
-  }, [fetchItems]);
+    const params = { include_owners: true, limit: 100 };
+    const cached = getCachedItemList(params);
+    if (cached && cached.length > 0) {
+      setAllItems(cached);
+      const { ownerMap, categoryList } = processItems(cached);
+      setOwners(ownerMap);
+      setCategories(categoryList);
+      lastSyncRef.current = Date.now();
+    }
+    
+    // Fetch fresh data if no cache or cache is stale
+    fetchItems(!cached || cached.length === 0);
+  }, [fetchItems, getCachedItemList, processItems]);
 
-  // Filter items client-side by category and search query
-  const filteredItems = allItems.filter((item) => {
-    // Filter by category (client-side)
-    if (selectedCategory && item.category !== selectedCategory) {
-      return false;
-    }
+  // Periodic lightweight sync (every 30 seconds if user is on page)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      syncItems();
+    }, 30000); // Sync every 30 seconds
     
-    // Filter by search query
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      return (
-        item.title.toLowerCase().includes(query) ||
-        item.category.toLowerCase().includes(query) ||
-        item.description?.toLowerCase().includes(query)
-      );
-    }
-    
-    return true;
-  });
+    return () => clearInterval(interval);
+  }, [syncItems]);
+
+  // Frontload client-side filtering with useMemo for performance
+  const filteredItems = useMemo(() => {
+    return allItems.filter((item) => {
+      // Filter by category (client-side)
+      if (selectedCategory && item.category !== selectedCategory) {
+        return false;
+      }
+      
+      // Filter by search query
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        return (
+          item.title.toLowerCase().includes(query) ||
+          item.category.toLowerCase().includes(query) ||
+          item.description?.toLowerCase().includes(query)
+        );
+      }
+      
+      return true;
+    });
+  }, [allItems, selectedCategory, searchQuery]);
 
   return (
     <div className="min-h-screen bg-white" data-testid="dashboard-page">

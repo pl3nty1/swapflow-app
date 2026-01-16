@@ -537,11 +537,46 @@ async def update_profile(update: UserUpdate, user: User = Depends(get_current_us
 
 # ============== ITEM ENDPOINTS ==============
 
-@api_router.get("/items")
-async def get_items(category: Optional[str] = None, user_id: Optional[str] = None, include_owners: bool = False, sort_by_views: bool = False, limit: Optional[int] = None):
-    """Get all available items, optionally filtered by category or user"""
+@api_router.get("/items/sync")
+async def get_items_sync(cached_ids: Optional[str] = None):
+    """
+    Lightweight sync endpoint: returns only item IDs and timestamps for cache validation.
+    Accepts comma-separated list of cached item IDs to compare against.
+    Returns: { item_ids: [id1, id2, ...], removed_ids: [id3, ...] }
+    """
     query = {"is_available": True}
-    if category:
+    items_cursor = db.items.find(query, {"_id": 0, "item_id": 1, "created_at": 1}).sort("created_at", -1)
+    items = await items_cursor.to_list(1000)  # Get all for sync comparison
+    
+    current_ids = {item["item_id"] for item in items}
+    
+    # If client provided cached IDs, find what's new/removed
+    removed_ids = []
+    if cached_ids:
+        cached_id_set = set(cached_ids.split(","))
+        removed_ids = list(cached_id_set - current_ids)
+    
+    # Return lightweight response: just IDs and timestamps
+    return {
+        "item_ids": [item["item_id"] for item in items],
+        "removed_ids": removed_ids,
+        "count": len(items)
+    }
+
+@api_router.get("/items")
+async def get_items(category: Optional[str] = None, user_id: Optional[str] = None, include_owners: bool = False, sort_by_views: bool = False, limit: Optional[int] = None, item_ids: Optional[str] = None):
+    """
+    Get all available items, optionally filtered by category or user.
+    If item_ids is provided (comma-separated), only fetch those specific items (for incremental updates).
+    """
+    query = {"is_available": True}
+    requested_ids = None
+    
+    # If specific item IDs requested, fetch only those (for incremental sync)
+    if item_ids:
+        requested_ids = [id.strip() for id in item_ids.split(",") if id.strip()]
+        query["item_id"] = {"$in": requested_ids}
+    elif category:
         query["category"] = category
         # Increment category click count
         await db.categories.update_one(
@@ -549,6 +584,7 @@ async def get_items(category: Optional[str] = None, user_id: Optional[str] = Non
             {"$inc": {"click_count": 1}},
             upsert=True
         )
+    
     if user_id:
         query["user_id"] = user_id
     
@@ -558,7 +594,10 @@ async def get_items(category: Optional[str] = None, user_id: Optional[str] = Non
     
     items_cursor = db.items.find(query, {"_id": 0}).sort(sort_field, sort_direction)
     
-    if limit:
+    if item_ids:
+        # Fetch specific items - no limit needed
+        items = await items_cursor.to_list(len(requested_ids))
+    elif limit:
         items = await items_cursor.to_list(limit)
     else:
         items = await items_cursor.to_list(100)

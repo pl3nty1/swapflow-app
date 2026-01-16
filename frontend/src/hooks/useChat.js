@@ -11,22 +11,43 @@ import { toast } from "sonner";
  */
 export const useChat = (tradeId = null) => {
   const { user, API, getAuthHeaders } = useAuth();
-  const { getCachedConversations } = usePreloadCache();
-  const [conversations, setConversations] = useState([]);
+  const { 
+    getCachedConversations, 
+    setCachedConversations, 
+    getCachedMessages, 
+    setCachedMessages, 
+    updateCachedMessage 
+  } = usePreloadCache();
+  
+  // Initialize conversations from cache immediately if available
+  const initialCachedConversations = getCachedConversations();
+  const [conversations, setConversations] = useState(initialCachedConversations || []);
   const [messages, setMessages] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!initialCachedConversations); // Only show loading if no cache
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef(null);
 
   // Fetch all conversations
-  const fetchConversations = useCallback(async () => {
-    // Check cache first
+  const fetchConversations = useCallback(async (forceRefresh = false) => {
+    // Always check cache first - use it if available and fresh
     const cached = getCachedConversations();
-    if (cached) {
+    if (cached && cached.length > 0 && !forceRefresh) {
       setConversations(cached);
       setIsLoading(false);
+      // Always refresh in background to keep cache fresh
+      const headers = getAuthHeaders();
+      axios.get(`${API}/conversations`, {
+        withCredentials: true,
+        headers: headers,
+      }).then(response => {
+        setConversations(response.data);
+        setCachedConversations(response.data);
+      }).catch(() => {}); // Silently fail - keep using cache
+      return; // Exit early - cache is good!
     }
 
+    // Cache miss or force refresh - fetch fresh data
+    setIsLoading(true);
     try {
       const headers = getAuthHeaders();
       const response = await axios.get(`${API}/conversations`, {
@@ -34,31 +55,60 @@ export const useChat = (tradeId = null) => {
         headers: headers,
       });
       setConversations(response.data);
+      setCachedConversations(response.data);
     } catch (error) {
       console.error("Failed to fetch conversations:", error);
+      // If we have stale cache, use it
+      if (cached && cached.length > 0) {
+        setConversations(cached);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [API, getAuthHeaders, getCachedConversations]);
+  }, [API, getAuthHeaders, getCachedConversations, setCachedConversations]);
 
   // Fetch messages for a specific trade
   const fetchMessages = useCallback(
-    async (targetTradeId = tradeId) => {
+    async (targetTradeId = tradeId, forceRefresh = false) => {
       if (!targetTradeId) return;
 
+      // Check cache first - use it if available and fresh
+      const cached = getCachedMessages(targetTradeId);
+      if (cached && cached.length > 0 && !forceRefresh) {
+        setMessages(cached);
+        // Always refresh in background to keep cache fresh (messages change frequently)
+        const headers = getAuthHeaders();
+        axios.get(`${API}/messages/${targetTradeId}`, {
+          withCredentials: true,
+          headers: headers,
+        }).then(response => {
+          const freshMessages = response.data || [];
+          setMessages(freshMessages);
+          setCachedMessages(targetTradeId, freshMessages);
+        }).catch(() => {}); // Silently fail - keep using cache
+        return; // Exit early - cache is good!
+      }
+
+      // Cache miss or force refresh - fetch fresh data
       try {
         const headers = getAuthHeaders();
         const response = await axios.get(`${API}/messages/${targetTradeId}`, {
           withCredentials: true,
           headers: headers,
         });
-        setMessages(response.data || []);
+        const freshMessages = response.data || [];
+        setMessages(freshMessages);
+        setCachedMessages(targetTradeId, freshMessages);
       } catch (error) {
         console.error("Failed to fetch messages:", error);
+        // If we have stale cache, use it
+        if (cached && cached.length > 0) {
+          setMessages(cached);
+        }
         throw error;
       }
     },
-    [API, tradeId, getAuthHeaders]
+    [API, tradeId, getAuthHeaders, getCachedMessages, setCachedMessages]
   );
 
   // Mark messages as read
@@ -120,13 +170,17 @@ export const useChat = (tradeId = null) => {
         );
 
         // Replace optimistic message with real one
+        const realMessage = response.data;
         setMessages((prev) => {
           const filtered = prev.filter((m) => m.message_id !== tempId);
-          if (!filtered.some((m) => m.message_id === response.data.message_id)) {
-            return [...filtered, response.data];
+          if (!filtered.some((m) => m.message_id === realMessage.message_id)) {
+            return [...filtered, realMessage];
           }
           return filtered;
         });
+        
+        // Update cache
+        updateCachedMessage(targetTradeId, realMessage);
       } catch (error) {
         // Rollback optimistic update
         setMessages((prev) => prev.filter((m) => m.message_id !== tempId));
@@ -136,7 +190,7 @@ export const useChat = (tradeId = null) => {
         setIsSending(false);
       }
     },
-    [API, tradeId, user, getAuthHeaders]
+    [API, tradeId, user, getAuthHeaders, updateCachedMessage]
   );
 
   // Handle WebSocket messages
@@ -153,6 +207,9 @@ export const useChat = (tradeId = null) => {
             }
             return [...prev, newMsg];
           });
+          
+          // Update cache
+          updateCachedMessage(tradeId, newMsg);
 
           // Mark as read if we're viewing this trade
           if (newMsg.receiver_id === user?.user_id) {

@@ -20,8 +20,15 @@ export const usePreload = (user, API, getAuthHeaders) => {
   // Item cache: stores items by ID and item lists by query key
   const itemCacheRef = useRef({
     itemsById: {}, // { itemId: { item, owner, timestamp } }
-    itemLists: {}, // { queryKey: { items, timestamp } }
-    CACHE_DURATION: 5 * 60 * 1000 // 5 minutes
+    itemLists: {}, // { queryKey: { items, timestamp, lastSync } }
+    CACHE_DURATION: 10 * 60 * 1000, // 10 minutes - extended for better persistence
+    SYNC_INTERVAL: 30 * 1000 // Sync check every 30 seconds (lightweight)
+  });
+  
+  // Messages cache: stores messages by trade_id
+  const messagesCacheRef = useRef({
+    messagesByTradeId: {}, // { tradeId: { messages, timestamp } }
+    CACHE_DURATION: 10 * 60 * 1000 // 10 minutes - same as items
   });
 
   useEffect(() => {
@@ -54,15 +61,16 @@ export const usePreload = (user, API, getAuthHeaders) => {
         );
 
         // Preload items (for dashboard - limit to first page for performance)
-        preloadPromises.push(
+        // Use lower priority - delay this to not block other critical data
+        setTimeout(() => {
           axios.get(`${API}/items?include_owners=true`, {
             withCredentials: true,
             headers: headers,
             params: { limit: 20 } // Preload first 20 items
           }).then(res => {
             preloadCacheRef.current.items = res.data;
-          }).catch(() => {})
-        );
+          }).catch(() => {});
+        }, 1000); // Delay items preload by 1 second
 
         // Preload categories (for dashboard and post item)
         preloadPromises.push(
@@ -74,15 +82,15 @@ export const usePreload = (user, API, getAuthHeaders) => {
           }).catch(() => {})
         );
 
-        // Preload notifications
-        preloadPromises.push(
+        // Preload notifications (lower priority - delay)
+        setTimeout(() => {
           axios.get(`${API}/notifications`, {
             withCredentials: true,
             headers: headers
           }).then(res => {
             preloadCacheRef.current.notifications = res.data;
-          }).catch(() => {})
-        );
+          }).catch(() => {});
+        }, 1500); // Delay notifications by 1.5 seconds
 
         // Preload unread message count
         preloadPromises.push(
@@ -107,10 +115,11 @@ export const usePreload = (user, API, getAuthHeaders) => {
       }
     };
 
-    // Start preloading after a short delay to not block initial render
-    const timeoutId = setTimeout(() => {
-      preloadData();
-    }, 500);
+        // Start preloading after a short delay to not block initial render
+        // Increased delay to let UI render first
+        const timeoutId = setTimeout(() => {
+          preloadData();
+        }, 1000);
 
     return () => clearTimeout(timeoutId);
   }, [user, API, getAuthHeaders]);
@@ -125,12 +134,16 @@ export const usePreload = (user, API, getAuthHeaders) => {
   return {
     getCachedConversations: () => {
       const cached = preloadCacheRef.current.conversations;
-      // Cache is valid for 30 seconds
+      // Cache is valid for 10 minutes (extended from 30 seconds)
       if (cached && preloadCacheRef.current.timestamp && 
-          Date.now() - preloadCacheRef.current.timestamp < 30000) {
+          Date.now() - preloadCacheRef.current.timestamp < 10 * 60 * 1000) {
         return cached;
       }
       return null;
+    },
+    setCachedConversations: (conversations) => {
+      preloadCacheRef.current.conversations = conversations;
+      preloadCacheRef.current.timestamp = Date.now();
     },
     getCachedTrades: () => {
       const cached = preloadCacheRef.current.trades;
@@ -195,11 +208,25 @@ export const usePreload = (user, API, getAuthHeaders) => {
       }
       return null;
     },
-    setCachedItemList: (params = {}, items) => {
+    getCachedItemListMetadata: (params = {}) => {
+      const key = getItemListKey(params);
+      const cached = itemCacheRef.current.itemLists[key];
+      if (cached) {
+        return {
+          items: cached.items,
+          timestamp: cached.timestamp,
+          lastSync: cached.lastSync || cached.timestamp,
+          itemIds: cached.items?.map(i => i.item_id).join(',') || ''
+        };
+      }
+      return null;
+    },
+    setCachedItemList: (params = {}, items, lastSync = null) => {
       const key = getItemListKey(params);
       itemCacheRef.current.itemLists[key] = {
         items,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        lastSync: lastSync || Date.now()
       };
       // Also cache individual items
       items.forEach(item => {
@@ -211,6 +238,37 @@ export const usePreload = (user, API, getAuthHeaders) => {
           };
         }
       });
+    },
+    updateCachedItemList: (params = {}, newItems, removedIds = []) => {
+      // Incrementally update cache with new/changed items
+      const key = getItemListKey(params);
+      const cached = itemCacheRef.current.itemLists[key];
+      if (cached && cached.items) {
+        // Remove deleted items
+        const itemsById = new Map(cached.items.map(i => [i.item_id, i]));
+        removedIds.forEach(id => itemsById.delete(id));
+        
+        // Add/update new items
+        newItems.forEach(newItem => {
+          itemsById.set(newItem.item_id, newItem);
+          // Also update individual item cache
+          itemCacheRef.current.itemsById[newItem.item_id] = {
+            item: newItem,
+            owner: newItem.owner || null,
+            timestamp: Date.now()
+          };
+        });
+        
+        cached.items = Array.from(itemsById.values());
+        cached.lastSync = Date.now();
+      } else {
+        // No existing cache, set new
+        itemCacheRef.current.itemLists[key] = {
+          items: newItems,
+          timestamp: Date.now(),
+          lastSync: Date.now()
+        };
+      }
     },
     invalidateItemCache: (itemId = null) => {
       if (itemId) {
@@ -229,6 +287,40 @@ export const usePreload = (user, API, getAuthHeaders) => {
         itemCacheRef.current.itemLists = {};
       }
     },
+    // Messages cache functions
+    getCachedMessages: (tradeId) => {
+      const cached = messagesCacheRef.current.messagesByTradeId[tradeId];
+      if (cached && Date.now() - cached.timestamp < messagesCacheRef.current.CACHE_DURATION) {
+        return cached.messages;
+      }
+      return null;
+    },
+    setCachedMessages: (tradeId, messages) => {
+      messagesCacheRef.current.messagesByTradeId[tradeId] = {
+        messages,
+        timestamp: Date.now()
+      };
+    },
+    updateCachedMessage: (tradeId, newMessage) => {
+      // Add or update a single message in cache
+      const cached = messagesCacheRef.current.messagesByTradeId[tradeId];
+      if (cached) {
+        const existingIndex = cached.messages.findIndex(m => m.message_id === newMessage.message_id);
+        if (existingIndex >= 0) {
+          cached.messages[existingIndex] = newMessage;
+        } else {
+          cached.messages.push(newMessage);
+        }
+        cached.timestamp = Date.now();
+      }
+    },
+    invalidateMessagesCache: (tradeId = null) => {
+      if (tradeId) {
+        delete messagesCacheRef.current.messagesByTradeId[tradeId];
+      } else {
+        messagesCacheRef.current.messagesByTradeId = {};
+      }
+    },
     invalidateCache: () => {
       preloadCacheRef.current = {
         conversations: null,
@@ -241,6 +333,7 @@ export const usePreload = (user, API, getAuthHeaders) => {
       };
       itemCacheRef.current.itemsById = {};
       itemCacheRef.current.itemLists = {};
+      messagesCacheRef.current.messagesByTradeId = {};
       preloadedRef.current = false;
     }
   };
