@@ -88,7 +88,7 @@ const MyItems = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [API, user?.user_id, getCachedItemList, setCachedItemList]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, user?.user_id, getCachedItemList, setCachedItemList, getAuthHeaders]);
 
   useEffect(() => {
     fetchItems();

@@ -136,7 +136,7 @@ const ItemDetail = () => {
     } finally {
       setIsLoadingItems(false);
     }
-  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, getAuthHeaders]);
 
   const handleOpenTradeDialog = () => {
     setIsTradeOpen(true);

@@ -115,7 +115,7 @@ const AdminDashboard = () => {
       console.error("Failed to fetch stats:", error);
       toast.error("Failed to load statistics");
     }
-  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, getAuthHeaders]);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -135,7 +135,7 @@ const AdminDashboard = () => {
       console.error("Failed to fetch users:", error);
       toast.error("Failed to load users");
     }
-  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, getAuthHeaders]);
 
   const fetchItems = useCallback(async () => {
     try {
@@ -165,7 +165,7 @@ const AdminDashboard = () => {
       console.error("Failed to fetch items:", error);
       toast.error("Failed to load items");
     }
-  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, getAuthHeaders]);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -179,7 +179,7 @@ const AdminDashboard = () => {
       console.error("Failed to fetch categories:", error);
       toast.error("Failed to load categories");
     }
-  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, getAuthHeaders]);
 
   const handleDeleteCategory = async () => {
     if (!deletingCategory) return;
@@ -210,7 +210,7 @@ const AdminDashboard = () => {
       console.error("Failed to fetch trades:", error);
       toast.error("Failed to load trades");
     }
-  }, [API]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, getAuthHeaders]);
 
   const fetchBugReports = useCallback(async () => {
     try {
@@ -223,7 +223,7 @@ const AdminDashboard = () => {
     } catch (error) {
       console.error("Failed to fetch bug reports:", error);
     }
-  }, [API]);
+  }, [API, getAuthHeaders]);
 
   const handleValidateBug = async (bugId, e) => {
     if (e) e.stopPropagation(); // Prevent row click

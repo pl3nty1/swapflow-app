@@ -39,8 +39,7 @@ export const useChat = (tradeId = null) => {
     } finally {
       setIsLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [API]); // getAuthHeaders and getCachedConversations are stable
+  }, [API, getAuthHeaders, getCachedConversations]);
 
   // Fetch messages for a specific trade
   const fetchMessages = useCallback(
@@ -59,8 +58,7 @@ export const useChat = (tradeId = null) => {
         throw error;
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [API, tradeId] // getAuthHeaders is stable
+    [API, tradeId, getAuthHeaders]
   );
 
   // Mark messages as read
@@ -81,8 +79,7 @@ export const useChat = (tradeId = null) => {
         console.error("Failed to mark messages as read:", error);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [API, tradeId, fetchConversations] // getAuthHeaders is stable
+    [API, tradeId, fetchConversations, getAuthHeaders]
   );
 
   // Send a message
@@ -139,8 +136,7 @@ export const useChat = (tradeId = null) => {
         setIsSending(false);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [API, tradeId, user] // getAuthHeaders is stable
+    [API, tradeId, user, getAuthHeaders]
   );
 
   // Handle WebSocket messages

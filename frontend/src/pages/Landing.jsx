@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,65 @@ const Landing = () => {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [featuredItems, setFeaturedItems] = useState([]);
   const [pendingItemId, setPendingItemId] = useState(null);
+
+  const handleGoogleSignIn = useCallback(async (response) => {
+    if (!API) {
+      console.error('API URL not configured');
+      alert('Backend URL not configured. Please check environment variables.');
+      return;
+    }
+
+    try {
+      // Send the credential to backend
+      const authResponse = await axios.post(
+        `${API}/auth/google`,
+        { credential: response.credential },
+        { 
+          withCredentials: true,
+          timeout: 15000 // 15 second timeout
+        }
+      );
+
+      if (authResponse.data && authResponse.data.user) {
+        // Store session token as fallback if cookie doesn't work
+        if (authResponse.data.session_token) {
+          localStorage.setItem('session_token', authResponse.data.session_token);
+        }
+        
+        // Check for pending item ID in state or localStorage
+        const itemId = pendingItemId || localStorage.getItem('pending_item_id');
+        if (itemId) {
+          localStorage.removeItem('pending_item_id');
+          setPendingItemId(null);
+        }
+        
+        // Small delay to ensure cookie is set
+        setTimeout(() => {
+          // If there's a pending item ID, navigate to it, otherwise go to dashboard
+          if (itemId) {
+            navigate(`/item/${itemId}`, { replace: true });
+          } else {
+            navigate("/dashboard", { replace: true });
+          }
+        }, 500);
+      } else {
+        console.error('No user data in auth response');
+        alert('Authentication failed. Please try again.');
+      }
+    } catch (error) {
+      console.error("Auth error:", error);
+      if (error.response) {
+        console.error("Error response:", error.response.data);
+        alert(`Authentication failed: ${error.response.data?.detail || error.message}`);
+      } else if (error.code === 'ECONNABORTED') {
+        alert('Request timed out. The server may be slow or unreachable.');
+      } else if (error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
+        alert('Network error: Cannot reach the server. Please check your connection and try again.');
+      } else {
+        alert(`Network error: ${error.message}. Please check your connection and try again.`);
+      }
+    }
+  }, [pendingItemId, navigate]);
 
   useEffect(() => {
     // Check for OAuth callback (ID token in URL hash)
@@ -128,66 +187,7 @@ const Landing = () => {
 
     checkAuth();
     fetchItems();
-  }, [navigate]);
-
-  const handleGoogleSignIn = async (response) => {
-    if (!API) {
-      console.error('API URL not configured');
-      alert('Backend URL not configured. Please check environment variables.');
-      return;
-    }
-
-    try {
-      // Send the credential to backend
-      const authResponse = await axios.post(
-        `${API}/auth/google`,
-        { credential: response.credential },
-        { 
-          withCredentials: true,
-          timeout: 15000 // 15 second timeout
-        }
-      );
-
-      if (authResponse.data && authResponse.data.user) {
-        // Store session token as fallback if cookie doesn't work
-        if (authResponse.data.session_token) {
-          localStorage.setItem('session_token', authResponse.data.session_token);
-        }
-        
-        // Check for pending item ID in state or localStorage
-        const itemId = pendingItemId || localStorage.getItem('pending_item_id');
-        if (itemId) {
-          localStorage.removeItem('pending_item_id');
-          setPendingItemId(null);
-        }
-        
-        // Small delay to ensure cookie is set
-        setTimeout(() => {
-          // If there's a pending item ID, navigate to it, otherwise go to dashboard
-          if (itemId) {
-            navigate(`/item/${itemId}`, { replace: true });
-          } else {
-            navigate("/dashboard", { replace: true });
-          }
-        }, 500);
-      } else {
-        console.error('No user data in auth response');
-        alert('Authentication failed. Please try again.');
-      }
-    } catch (error) {
-      console.error("Auth error:", error);
-      if (error.response) {
-        console.error("Error response:", error.response.data);
-        alert(`Authentication failed: ${error.response.data?.detail || error.message}`);
-      } else if (error.code === 'ECONNABORTED') {
-        alert('Request timed out. The server may be slow or unreachable.');
-      } else if (error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
-        alert('Network error: Cannot reach the server. Please check your connection and try again.');
-      } else {
-        alert(`Network error: ${error.message}. Please check your connection and try again.`);
-      }
-    }
-  };
+  }, [navigate, handleGoogleSignIn]);
 
   const handleItemClick = async (itemId) => {
     // Check if user is authenticated

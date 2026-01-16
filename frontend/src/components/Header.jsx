@@ -50,7 +50,7 @@ export const Header = () => {
     } catch (error) {
       console.error("Failed to fetch unread count:", error);
     }
-  }, [user, API, getCachedUnreadCount]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [user, API, getCachedUnreadCount, getAuthHeaders]);
 
   useEffect(() => {
     fetchUnreadCount();
@@ -103,7 +103,7 @@ export const Header = () => {
     } catch (error) {
       console.error("Failed to fetch notifications:", error);
     }
-  }, [user, API, getCachedNotifications]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [user, API, getCachedNotifications, getAuthHeaders]);
   
   // Mark all notifications as read when bell is clicked
   const handleBellClick = useCallback(async () => {
@@ -123,7 +123,7 @@ export const Header = () => {
     } catch (error) {
       console.error("Failed to mark notifications as read:", error);
     }
-  }, [API, notificationCount]); // getAuthHeaders is stable and doesn't need to be in dependencies
+  }, [API, notificationCount, getAuthHeaders]);
 
   // WebSocket connection for notifications
   const handleNotificationMessage = useCallback((channel, type, data) => {

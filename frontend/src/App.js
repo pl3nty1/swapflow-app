@@ -102,7 +102,7 @@ const ProtectedRoute = ({ children }) => {
     };
 
     checkAuth();
-  }, [navigate, setUser, user, setIsLoading, API]);
+  }, [navigate, setUser, user, setIsLoading]); // API is a constant
 
   if (isLoading) {
     return (
@@ -169,7 +169,7 @@ const AdminProtectedRoute = ({ children }) => {
     };
 
     checkAuth();
-  }, [navigate, setUser, user, setIsLoading, API]);
+  }, [navigate, setUser, user, setIsLoading]); // API is a constant
 
   if (isLoading) {
     return (
