@@ -238,7 +238,8 @@ function AuthProvider({ children }) {
     };
 
     checkAuth();
-  }, [API]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // API is a module constant, doesn't need to be in deps
 
   const logout = async () => {
     try {

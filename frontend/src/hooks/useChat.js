@@ -242,7 +242,7 @@ export const useChat = (tradeId = null) => {
         });
       }
     },
-    [tradeId, user, markAsRead]
+    [tradeId, user, markAsRead, updateCachedMessage]
   );
 
   // WebSocket connection

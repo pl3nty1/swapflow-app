@@ -136,7 +136,7 @@ export const WebSocketProvider = ({ children }) => {
       isConnectingRef.current = false;
       setConnected(false);
     }
-  }, [user, API, getSubscribedChannels]);
+  }, [user, API]);
 
   // Disconnect WebSocket
   const disconnect = useCallback(() => {

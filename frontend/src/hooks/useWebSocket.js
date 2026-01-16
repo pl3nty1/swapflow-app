@@ -42,17 +42,9 @@ export const useWebSocket = (channels = ["messages", "notifications", "trades"],
     return unsubscribe;
   }, [channels, subscribe, connected]);
 
-  // Handle connection status changes
-  useEffect(() => {
-    if (connected && optionsRef.current.onConnect) {
-      optionsRef.current.onConnect();
-    }
-  }, [connected]);
-
   return {
     connected,
     sendMessage,
-    disconnect: () => {}, // Disconnect is handled by context
     reconnect,
   };
 };

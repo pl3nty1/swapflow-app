@@ -67,7 +67,6 @@ const Messages = () => {
     cancelTrade,
     addItem,
     removeItem,
-    handleTradeUpdate,
   } = useTrade(tradeId);
 
   // Handle WebSocket trade updates
@@ -109,13 +108,6 @@ const Messages = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tradeId]); // Functions are stable, only depend on tradeId
 
-  // Ensure current trade appears in conversations list
-  useEffect(() => {
-    if (tradeId && trade && partner && !conversations.find((c) => c.trade_id === tradeId)) {
-      // This will be handled by WebSocket updates, but we can add it optimistically
-    }
-  }, [tradeId, trade, partner, conversations]);
-
   // Helper functions
   const getInitials = (name) => {
     if (!name) return "U";
@@ -149,13 +141,8 @@ const Messages = () => {
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !tradeId) return;
-
-    try {
-      await sendMessage(newMessage.trim(), tradeId);
-      setNewMessage("");
-    } catch (error) {
-      // Error handling is done in the hook
-    }
+    await sendMessage(newMessage.trim(), tradeId);
+    setNewMessage("");
   };
 
   // Handle adding item to trade
@@ -165,12 +152,8 @@ const Messages = () => {
     const itemToAdd = myAvailableItems.find((item) => item.item_id === itemId);
     if (!itemToAdd) return;
 
-    try {
-      await addItem(itemId, side);
-      setAddingItemTradeId(null);
-    } catch (error) {
-      // Error handling is done in the hook
-    }
+    await addItem(itemId, side);
+    setAddingItemTradeId(null);
   };
 
   // Handle removing item from trade
@@ -220,22 +203,14 @@ const Messages = () => {
 
   // Handle trade confirmation
   const handleConfirm = async () => {
-    try {
-      await confirmTrade();
-    } catch (error) {
-      // Error handling is done in the hook
-    }
+    await confirmTrade();
   };
 
   // Handle trade cancellation
   const handleCancel = async () => {
     if (!window.confirm("Are you sure you want to cancel this trade?")) return;
-    try {
-      await cancelTrade();
-      navigate("/messages");
-    } catch (error) {
-      // Error handling is done in the hook
-    }
+    await cancelTrade();
+    navigate("/messages");
   };
 
   // Only show loading spinner if we're loading AND have no conversations (first load)
@@ -425,32 +400,29 @@ const Messages = () => {
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {myAvailableItems.length === 0 ? (
               <p className="text-slate-500 text-center py-4">No available items to add</p>
-            ) : (
-              myAvailableItems.map((item) => {
-                if (!trade) return null;
-                const isOwner = trade.trade.owner_id === user.user_id;
-                const side = isOwner ? "owner" : "trader";
-                return (
-                  <div
-                    key={item.item_id}
-                    onClick={() => handleAddItem(item.item_id, side)}
-                    className="p-3 border rounded-lg cursor-pointer hover:bg-slate-50"
-                  >
-                    <div className="flex gap-3">
-                      <img
-                        src={item.image}
-                        alt={item.title}
-                        className="w-16 h-16 object-cover rounded"
-                      />
-                      <div className="flex-1">
-                        <h4 className="font-medium">{item.title}</h4>
-                        <p className="text-sm text-slate-500">{item.category}</p>
-                      </div>
+            ) : trade && (() => {
+              const isOwner = trade.trade.owner_id === user.user_id;
+              const side = isOwner ? "owner" : "trader";
+              return myAvailableItems.map((item) => (
+                <div
+                  key={item.item_id}
+                  onClick={() => handleAddItem(item.item_id, side)}
+                  className="p-3 border rounded-lg cursor-pointer hover:bg-slate-50"
+                >
+                  <div className="flex gap-3">
+                    <img
+                      src={item.image}
+                      alt={item.title}
+                      className="w-16 h-16 object-cover rounded"
+                    />
+                    <div className="flex-1">
+                      <h4 className="font-medium">{item.title}</h4>
+                      <p className="text-sm text-slate-500">{item.category}</p>
                     </div>
                   </div>
-                );
-              })
-            )}
+                </div>
+              ));
+            })()}
           </div>
         </DialogContent>
       </Dialog>

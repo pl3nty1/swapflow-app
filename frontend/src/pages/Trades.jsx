@@ -89,11 +89,7 @@ const Trades = () => {
 
   // Handle trade confirmation
   const handleConfirm = async (tradeId) => {
-    try {
-      await confirmTrade(tradeId);
-    } catch (error) {
-      // Error handling is done in the hook
-    }
+    await confirmTrade(tradeId);
   };
 
   // Handle rating submission
@@ -131,23 +127,14 @@ const Trades = () => {
   // Handle trade cancellation
   const handleCancelTrade = async () => {
     if (!cancelDialog.tradeId) return;
-
-    try {
-      await cancelTrade(cancelDialog.tradeId);
-      setCancelDialog({ isOpen: false, tradeId: null });
-    } catch (error) {
-      // Error handling is done in the hook
-    }
+    await cancelTrade(cancelDialog.tradeId);
+    setCancelDialog({ isOpen: false, tradeId: null });
   };
 
   // Handle adding item to trade
   const handleAddItem = async (tradeId, itemId, side) => {
-    try {
-      await addItem(tradeId, itemId, side);
-      setAddingItemTradeId(null);
-    } catch (error) {
-      // Error handling is done in the hook
-    }
+    await addItem(tradeId, itemId, side);
+    setAddingItemTradeId(null);
   };
 
   // Handle removing item from trade
@@ -156,12 +143,7 @@ const Trades = () => {
       setDeleteLastItemDialog({ isOpen: true, tradeId, itemId });
       return;
     }
-
-    try {
-      await removeItem(tradeId, itemId);
-    } catch (error) {
-      // Error handling is done in the hook
-    }
+    await removeItem(tradeId, itemId);
   };
 
   // Handle confirming deletion of last item
