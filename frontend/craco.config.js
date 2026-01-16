@@ -1,6 +1,12 @@
 // craco.config.js
 const path = require("path");
-require("dotenv").config();
+
+// Try to load dotenv, but don't fail if it's not installed (production builds)
+try {
+  require("dotenv").config();
+} catch (e) {
+  // dotenv is optional, especially for production builds
+}
 
 // Check if we're in development/preview mode (not production build)
 // Craco sets NODE_ENV=development for start, NODE_ENV=production for build
@@ -17,8 +23,13 @@ let setupDevServer;
 let babelMetadataPlugin;
 
 if (config.enableVisualEdits) {
-  setupDevServer = require("./plugins/visual-edits/dev-server-setup");
-  babelMetadataPlugin = require("./plugins/visual-edits/babel-metadata-plugin");
+  try {
+    setupDevServer = require("./plugins/visual-edits/dev-server-setup");
+    babelMetadataPlugin = require("./plugins/visual-edits/babel-metadata-plugin");
+  } catch (e) {
+    // Visual edits plugins are optional - may fail if dependencies are missing
+    console.warn("[Craco] Visual edits plugins not available:", e.message);
+  }
 }
 
 // Conditionally load health check modules only if enabled
@@ -27,9 +38,14 @@ let setupHealthEndpoints;
 let healthPluginInstance;
 
 if (config.enableHealthCheck) {
-  WebpackHealthPlugin = require("./plugins/health-check/webpack-health-plugin");
-  setupHealthEndpoints = require("./plugins/health-check/health-endpoints");
-  healthPluginInstance = new WebpackHealthPlugin();
+  try {
+    WebpackHealthPlugin = require("./plugins/health-check/webpack-health-plugin");
+    setupHealthEndpoints = require("./plugins/health-check/health-endpoints");
+    healthPluginInstance = new WebpackHealthPlugin();
+  } catch (e) {
+    // Health check plugins are optional - may fail if dependencies are missing
+    console.warn("[Craco] Health check plugins not available:", e.message);
+  }
 }
 
 const webpackConfig = {
