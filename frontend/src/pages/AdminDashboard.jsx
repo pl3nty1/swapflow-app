@@ -5,6 +5,8 @@ import { useAuth } from "@/App";
 import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -35,7 +37,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Shield, Trash2, ArrowUp, ArrowDown, Search, Users, Package, MessageSquare, ArrowLeftRight, AlertTriangle, ChevronDown, Bug, Check } from "lucide-react";
+import { Loader2, Shield, Trash2, ArrowUp, ArrowDown, Search, Users, Package, MessageSquare, ArrowLeftRight, AlertTriangle, ChevronDown, Bug, Check, X } from "lucide-react";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -75,6 +77,19 @@ const AdminDashboard = () => {
   // Bug Reports
   const [bugReports, setBugReports] = useState([]);
   const [validatingBugId, setValidatingBugId] = useState(null);
+  const [invalidatingBugId, setInvalidatingBugId] = useState(null);
+  const [fixingBugId, setFixingBugId] = useState(null);
+  const [selectedBug, setSelectedBug] = useState(null);
+  const [bugDialogOpen, setBugDialogOpen] = useState(false);
+  const [bugSubTab, setBugSubTab] = useState("pending"); // "pending", "valid", "fixed"
+  
+  // Reports
+  const [reports, setReports] = useState([]);
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [reportSubTab, setReportSubTab] = useState("pending"); // "pending", "resolved", "dismissed"
+  const [resolvingReportId, setResolvingReportId] = useState(null);
+  const [dismissingReportId, setDismissingReportId] = useState(null);
   
   // Database reset
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
@@ -109,7 +124,13 @@ const AdminDashboard = () => {
         withCredentials: true,
         headers: headers
       });
-      setUsers(response.data);
+      // Sort users by most recently active first
+      const sortedUsers = [...response.data].sort((a, b) => {
+        const aTime = a.last_active ? new Date(a.last_active).getTime() : 0;
+        const bTime = b.last_active ? new Date(b.last_active).getTime() : 0;
+        return bTime - aTime; // Descending order (most recent first)
+      });
+      setUsers(sortedUsers);
     } catch (error) {
       console.error("Failed to fetch users:", error);
       toast.error("Failed to load users");
@@ -204,7 +225,8 @@ const AdminDashboard = () => {
     }
   }, [API]);
 
-  const handleValidateBug = async (bugId) => {
+  const handleValidateBug = async (bugId, e) => {
+    if (e) e.stopPropagation(); // Prevent row click
     setValidatingBugId(bugId);
     try {
       const headers = getAuthHeaders();
@@ -216,11 +238,170 @@ const AdminDashboard = () => {
       toast.success("Bug validated and trade points awarded!");
       fetchBugReports();
       fetchStats(); // Refresh stats to show updated trade points
+      setBugDialogOpen(false);
+      setSelectedBug(null);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to validate bug");
     } finally {
       setValidatingBugId(null);
     }
+  };
+
+  const handleInvalidateBug = async (bugId, e) => {
+    if (e) e.stopPropagation(); // Prevent row click
+    if (!window.confirm("Are you sure you want to delete this bug report? This action cannot be undone.")) {
+      return;
+    }
+    setInvalidatingBugId(bugId);
+    try {
+      const headers = getAuthHeaders();
+      await axios.post(
+        `${API}/admin/bug-reports/${bugId}/invalidate`,
+        {},
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Bug report deleted");
+      fetchBugReports();
+      setBugDialogOpen(false);
+      setSelectedBug(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to delete bug report");
+    } finally {
+      setInvalidatingBugId(null);
+    }
+  };
+
+  const handleMarkFixed = async (bugId, e) => {
+    if (e) e.stopPropagation(); // Prevent row click
+    setFixingBugId(bugId);
+    try {
+      const headers = getAuthHeaders();
+      await axios.post(
+        `${API}/admin/bug-reports/${bugId}/mark-fixed`,
+        {},
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Bug marked as fixed");
+      fetchBugReports();
+      setBugDialogOpen(false);
+      setSelectedBug(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to mark bug as fixed");
+    } finally {
+      setFixingBugId(null);
+    }
+  };
+
+  const fetchReports = useCallback(async () => {
+    try {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API}/admin/reports`, {
+        withCredentials: true,
+        headers: headers
+      });
+      setReports(response.data);
+    } catch (error) {
+      console.error("Failed to fetch reports:", error);
+      toast.error("Failed to load reports");
+    }
+  }, [API, getAuthHeaders]);
+
+  const handleResolveReport = async (reportId, e) => {
+    if (e) e.stopPropagation();
+    setResolvingReportId(reportId);
+    try {
+      const headers = getAuthHeaders();
+      await axios.post(
+        `${API}/admin/reports/${reportId}/resolve`,
+        {},
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Report marked as resolved");
+      fetchReports();
+      setReportDialogOpen(false);
+      setSelectedReport(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to resolve report");
+    } finally {
+      setResolvingReportId(null);
+    }
+  };
+
+  const handleDismissReport = async (reportId, e) => {
+    if (e) e.stopPropagation();
+    setDismissingReportId(reportId);
+    try {
+      const headers = getAuthHeaders();
+      await axios.post(
+        `${API}/admin/reports/${reportId}/dismiss`,
+        {},
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Report dismissed");
+      fetchReports();
+      setReportDialogOpen(false);
+      setSelectedReport(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to dismiss report");
+    } finally {
+      setDismissingReportId(null);
+    }
+  };
+
+  const handleRemoveItemFromReport = async (itemId, reportId) => {
+    try {
+      const headers = getAuthHeaders();
+      // Remove item
+      await axios.delete(`${API}/admin/items/${itemId}`, {
+        withCredentials: true,
+        headers: headers
+      });
+      // Resolve report with action taken
+      await axios.post(
+        `${API}/admin/reports/${reportId}/resolve`,
+        { action_taken: "item_removed" },
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("Item removed and report resolved");
+      fetchReports();
+      setReportDialogOpen(false);
+      setSelectedReport(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to remove item");
+    }
+  };
+
+  const handleRemoveUserFromReport = async (userId, reportId) => {
+    try {
+      const headers = getAuthHeaders();
+      // Remove user
+      await axios.delete(`${API}/admin/users/${userId}`, {
+        withCredentials: true,
+        headers: headers
+      });
+      // Resolve report with action taken
+      await axios.post(
+        `${API}/admin/reports/${reportId}/resolve`,
+        { action_taken: "user_banned" },
+        { withCredentials: true, headers: headers }
+      );
+      toast.success("User removed and report resolved");
+      fetchReports();
+      setReportDialogOpen(false);
+      setSelectedReport(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to remove user");
+    }
+  };
+
+  const handleReportClick = (report) => {
+    setSelectedReport(report);
+    setReportDialogOpen(true);
+  };
+
+  const handleBugClick = (bug) => {
+    setSelectedBug(bug);
+    setBugDialogOpen(true);
   };
 
   const fetchMessages = useCallback(async (page = 0) => {
@@ -406,6 +587,8 @@ const AdminDashboard = () => {
             <TabsTrigger value="categories">Categories</TabsTrigger>
             <TabsTrigger value="trades">Trades</TabsTrigger>
             <TabsTrigger value="messages">Messages</TabsTrigger>
+            <TabsTrigger value="bugs">Bug Reports</TabsTrigger>
+            <TabsTrigger value="reports">Reports</TabsTrigger>
           </TabsList>
 
           {/* Statistics Tab */}
@@ -556,11 +739,11 @@ const AdminDashboard = () => {
                               const diffMs = now - lastActive;
                               const diffHours = diffMs / (1000 * 60 * 60);
                               
-                              if (diffHours < 24) {
-                                // Show time if less than 24 hours
+                              if (diffHours < 12) {
+                                // Show time if less than 12 hours
                                 return lastActive.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
                               } else {
-                                // Show date if 24 hours or more
+                                // Show date if 12 hours or more
                                 return lastActive.toLocaleDateString();
                               }
                             })()
@@ -824,77 +1007,537 @@ const AdminDashboard = () => {
 
           {/* Bug Reports Tab */}
           <TabsContent value="bugs" className="space-y-4">
-            <div className="border rounded-lg">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Reporter</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Steps to Reproduce</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {bugReports.map((bug) => (
-                    <TableRow key={bug.bug_id}>
-                      <TableCell className="font-medium">{bug.title}</TableCell>
-                      <TableCell>
-                        {bug.user?.username || bug.user?.name || bug.user?.email || "Unknown"}
-                      </TableCell>
-                      <TableCell className="max-w-md">
-                        <p className="text-sm line-clamp-2">{bug.description}</p>
-                      </TableCell>
-                      <TableCell className="max-w-md">
-                        <p className="text-sm font-mono line-clamp-3 whitespace-pre-wrap">{bug.steps_to_reproduce}</p>
-                      </TableCell>
-                      <TableCell>
-                        {bug.is_valid ? (
-                          <Badge variant="default" className="bg-green-600">
-                            Valid
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">Pending</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {new Date(bug.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        {!bug.is_valid ? (
-                          <Button
-                            size="sm"
-                            onClick={() => handleValidateBug(bug.bug_id)}
-                            disabled={validatingBugId === bug.bug_id}
-                            className="bg-green-600 hover:bg-green-700"
-                          >
-                            {validatingBugId === bug.bug_id ? (
-                              <Loader2 className="w-4 h-4 mr-2 spinner" />
-                            ) : (
-                              <Check className="w-4 h-4 mr-2" />
-                            )}
-                            Mark Valid
-                          </Button>
-                        ) : (
-                          <span className="text-sm text-slate-500">
-                            Validated by {bug.validator?.username || bug.validator?.name || "Admin"}
-                          </span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-            {bugReports.length === 0 && (
-              <div className="text-center py-8 text-slate-500">
-                No bug reports yet
-              </div>
-            )}
+            {/* Sub-tabs for bug status */}
+            <Tabs value={bugSubTab} onValueChange={setBugSubTab}>
+              <TabsList>
+                <TabsTrigger value="pending">Pending</TabsTrigger>
+                <TabsTrigger value="valid">Valid</TabsTrigger>
+                <TabsTrigger value="fixed">Fixed</TabsTrigger>
+              </TabsList>
+
+              {/* Pending Bugs */}
+              <TabsContent value="pending" className="space-y-4">
+                <div className="border rounded-lg">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Title</TableHead>
+                        <TableHead>Reporter</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {bugReports.filter(bug => !bug.is_valid && !bug.is_resolved).map((bug) => (
+                        <TableRow 
+                          key={bug.bug_id}
+                          className="cursor-pointer hover:bg-slate-50"
+                          onClick={() => handleBugClick(bug)}
+                        >
+                          <TableCell className="font-medium">{bug.title}</TableCell>
+                          <TableCell>
+                            {bug.user?.username || bug.user?.name || bug.user?.email || "Unknown"}
+                          </TableCell>
+                          <TableCell>
+                            {new Date(bug.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                onClick={(e) => handleValidateBug(bug.bug_id, e)}
+                                disabled={validatingBugId === bug.bug_id}
+                                className="bg-green-600 hover:bg-green-700"
+                              >
+                                {validatingBugId === bug.bug_id ? (
+                                  <Loader2 className="w-4 h-4 mr-2 spinner" />
+                                ) : (
+                                  <Check className="w-4 h-4 mr-2" />
+                                )}
+                                Mark Valid
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => handleInvalidateBug(bug.bug_id, e)}
+                                disabled={invalidatingBugId === bug.bug_id}
+                                className="border-red-300 text-red-600 hover:bg-red-50"
+                              >
+                                {invalidatingBugId === bug.bug_id ? (
+                                  <Loader2 className="w-4 h-4 mr-2 spinner" />
+                                ) : (
+                                  <X className="w-4 h-4 mr-2" />
+                                )}
+                                Delete
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {bugReports.filter(bug => !bug.is_valid && !bug.is_resolved).length === 0 && (
+                  <div className="text-center py-8 text-slate-500">
+                    No pending bug reports
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Valid Bugs */}
+              <TabsContent value="valid" className="space-y-4">
+                <div className="border rounded-lg">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Title</TableHead>
+                        <TableHead>Reporter</TableHead>
+                        <TableHead>Validated</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {bugReports.filter(bug => bug.is_valid && !bug.is_resolved).map((bug) => (
+                        <TableRow 
+                          key={bug.bug_id}
+                          className="cursor-pointer hover:bg-slate-50"
+                          onClick={() => handleBugClick(bug)}
+                        >
+                          <TableCell className="font-medium">{bug.title}</TableCell>
+                          <TableCell>
+                            {bug.user?.username || bug.user?.name || bug.user?.email || "Unknown"}
+                          </TableCell>
+                          <TableCell>
+                            {bug.validated_at ? new Date(bug.validated_at).toLocaleDateString() : "-"}
+                          </TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <Button
+                              size="sm"
+                              onClick={(e) => handleMarkFixed(bug.bug_id, e)}
+                              disabled={fixingBugId === bug.bug_id}
+                              className="bg-blue-600 hover:bg-blue-700"
+                            >
+                              {fixingBugId === bug.bug_id ? (
+                                <Loader2 className="w-4 h-4 mr-2 spinner" />
+                              ) : (
+                                <Check className="w-4 h-4 mr-2" />
+                              )}
+                              Mark Fixed
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {bugReports.filter(bug => bug.is_valid && !bug.is_resolved).length === 0 && (
+                  <div className="text-center py-8 text-slate-500">
+                    No validated bug reports
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Fixed Bugs */}
+              <TabsContent value="fixed" className="space-y-4">
+                <div className="border rounded-lg">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Title</TableHead>
+                        <TableHead>Reporter</TableHead>
+                        <TableHead>Fixed</TableHead>
+                        <TableHead>Fixed By</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {bugReports.filter(bug => bug.is_resolved).map((bug) => (
+                        <TableRow 
+                          key={bug.bug_id}
+                          className="cursor-pointer hover:bg-slate-50"
+                          onClick={() => handleBugClick(bug)}
+                        >
+                          <TableCell className="font-medium">{bug.title}</TableCell>
+                          <TableCell>
+                            {bug.user?.username || bug.user?.name || bug.user?.email || "Unknown"}
+                          </TableCell>
+                          <TableCell>
+                            {bug.resolved_at ? new Date(bug.resolved_at).toLocaleDateString() : "-"}
+                          </TableCell>
+                          <TableCell>
+                            {bug.resolver?.username || bug.resolver?.name || "Admin"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {bugReports.filter(bug => bug.is_resolved).length === 0 && (
+                  <div className="text-center py-8 text-slate-500">
+                    No fixed bug reports
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </TabsContent>
+
+          {/* Reports Tab */}
+          <TabsContent value="reports" className="space-y-4">
+            <Tabs value={reportSubTab} onValueChange={setReportSubTab}>
+              <TabsList>
+                <TabsTrigger value="pending">Pending</TabsTrigger>
+                <TabsTrigger value="resolved">Resolved</TabsTrigger>
+                <TabsTrigger value="dismissed">Dismissed</TabsTrigger>
+              </TabsList>
+
+              {/* Pending Reports */}
+              <TabsContent value="pending" className="space-y-4">
+                <div className="border rounded-lg">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Target</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Reporter</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {reports.filter(r => r.status === "pending").map((report) => (
+                        <TableRow 
+                          key={report.report_id}
+                          className="cursor-pointer hover:bg-slate-50"
+                          onClick={() => handleReportClick(report)}
+                        >
+                          <TableCell>
+                            <Badge variant="outline" className="capitalize">{report.report_type}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            {report.report_type === "item" && report.reported_item ? (
+                              <span className="text-blue-600 hover:underline">{report.reported_item.title}</span>
+                            ) : report.report_type === "user" && report.reported_user ? (
+                              <span className="text-blue-600 hover:underline">
+                                {report.reported_user.username || report.reported_user.name || report.reported_user.email}
+                              </span>
+                            ) : report.report_type === "trade" ? (
+                              <span className="text-blue-600 hover:underline">Trade #{report.reported_trade_id?.slice(-8)}</span>
+                            ) : "-"}
+                          </TableCell>
+                          <TableCell>{report.category}</TableCell>
+                          <TableCell>
+                            {report.reporter?.username || report.reporter?.name || report.reporter?.email || "Unknown"}
+                          </TableCell>
+                          <TableCell>
+                            {new Date(report.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => handleReportClick(report)}
+                            >
+                              View Details
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {reports.filter(r => r.status === "pending").length === 0 && (
+                  <div className="text-center py-8 text-slate-500">
+                    No pending reports
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Resolved Reports */}
+              <TabsContent value="resolved" className="space-y-4">
+                <div className="border rounded-lg">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Target</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Reporter</TableHead>
+                        <TableHead>Action Taken</TableHead>
+                        <TableHead>Resolved</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {reports.filter(r => r.status === "resolved").map((report) => (
+                        <TableRow 
+                          key={report.report_id}
+                          className="cursor-pointer hover:bg-slate-50"
+                          onClick={() => handleReportClick(report)}
+                        >
+                          <TableCell>
+                            <Badge variant="outline" className="capitalize">{report.report_type}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            {report.report_type === "item" && report.reported_item ? (
+                              <span className="text-blue-600 hover:underline">{report.reported_item.title}</span>
+                            ) : report.report_type === "user" && report.reported_user ? (
+                              <span className="text-blue-600 hover:underline">
+                                {report.reported_user.username || report.reported_user.name || report.reported_user.email}
+                              </span>
+                            ) : report.report_type === "trade" ? (
+                              <span className="text-blue-600 hover:underline">Trade #{report.reported_trade_id?.slice(-8)}</span>
+                            ) : "-"}
+                          </TableCell>
+                          <TableCell>{report.category}</TableCell>
+                          <TableCell>
+                            {report.reporter?.username || report.reporter?.name || report.reporter?.email || "Unknown"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className="bg-green-600 capitalize">
+                              {report.action_taken?.replace("_", " ") || "Resolved"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {report.resolved_at ? new Date(report.resolved_at).toLocaleDateString() : "-"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {reports.filter(r => r.status === "resolved").length === 0 && (
+                  <div className="text-center py-8 text-slate-500">
+                    No resolved reports
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Dismissed Reports */}
+              <TabsContent value="dismissed" className="space-y-4">
+                <div className="border rounded-lg">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Target</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Reporter</TableHead>
+                        <TableHead>Dismissed</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {reports.filter(r => r.status === "dismissed").map((report) => (
+                        <TableRow 
+                          key={report.report_id}
+                          className="cursor-pointer hover:bg-slate-50"
+                          onClick={() => handleReportClick(report)}
+                        >
+                          <TableCell>
+                            <Badge variant="outline" className="capitalize">{report.report_type}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            {report.report_type === "item" && report.reported_item ? (
+                              <span className="text-blue-600 hover:underline">{report.reported_item.title}</span>
+                            ) : report.report_type === "user" && report.reported_user ? (
+                              <span className="text-blue-600 hover:underline">
+                                {report.reported_user.username || report.reported_user.name || report.reported_user.email}
+                              </span>
+                            ) : report.report_type === "trade" ? (
+                              <span className="text-blue-600 hover:underline">Trade #{report.reported_trade_id?.slice(-8)}</span>
+                            ) : "-"}
+                          </TableCell>
+                          <TableCell>{report.category}</TableCell>
+                          <TableCell>
+                            {report.reporter?.username || report.reporter?.name || report.reporter?.email || "Unknown"}
+                          </TableCell>
+                          <TableCell>
+                            {report.resolved_at ? new Date(report.resolved_at).toLocaleDateString() : "-"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {reports.filter(r => r.status === "dismissed").length === 0 && (
+                  <div className="text-center py-8 text-slate-500">
+                    No dismissed reports
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </TabsContent>
         </Tabs>
+
+        {/* Bug Report Detail Dialog */}
+        <Dialog open={bugDialogOpen} onOpenChange={setBugDialogOpen}>
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Bug className="w-5 h-5" />
+                Bug Report Details
+              </DialogTitle>
+              <DialogDescription>
+                {selectedBug?.is_resolved 
+                  ? "This bug report has been fixed."
+                  : selectedBug?.is_valid 
+                  ? "This bug report has been validated."
+                  : "Review the bug report details below."}
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedBug && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Bug Title</Label>
+                  <Input
+                    value={selectedBug.title}
+                    readOnly
+                    className="bg-slate-50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Reporter</Label>
+                  <Input
+                    value={selectedBug.user?.username || selectedBug.user?.name || selectedBug.user?.email || "Unknown"}
+                    readOnly
+                    className="bg-slate-50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>What is the bug?</Label>
+                  <Textarea
+                    value={selectedBug.description}
+                    readOnly
+                    className="min-h-[100px] bg-slate-50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Steps to Reproduce</Label>
+                  <Textarea
+                    value={selectedBug.steps_to_reproduce}
+                    readOnly
+                    className="min-h-[120px] font-mono text-sm bg-slate-50 whitespace-pre-wrap"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Status</Label>
+                  <div>
+                    {selectedBug.is_resolved ? (
+                      <Badge variant="default" className="bg-blue-600">
+                        Fixed
+                        {selectedBug.resolver && (
+                          <span className="ml-2">
+                            (by {selectedBug.resolver?.username || selectedBug.resolver?.name || "Admin"})
+                          </span>
+                        )}
+                      </Badge>
+                    ) : selectedBug.is_valid ? (
+                      <Badge variant="default" className="bg-green-600">
+                        Valid
+                        {selectedBug.validator && (
+                          <span className="ml-2">
+                            (by {selectedBug.validator?.username || selectedBug.validator?.name || "Admin"})
+                          </span>
+                        )}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline">Pending</Badge>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Created</Label>
+                  <Input
+                    value={new Date(selectedBug.created_at).toLocaleString()}
+                    readOnly
+                    className="bg-slate-50"
+                  />
+                </div>
+
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setBugDialogOpen(false);
+                      setSelectedBug(null);
+                    }}
+                  >
+                    Close
+                  </Button>
+                  {!selectedBug.is_resolved && (
+                    <>
+                      {!selectedBug.is_valid ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={(e) => handleInvalidateBug(selectedBug.bug_id, e)}
+                            disabled={invalidatingBugId === selectedBug.bug_id}
+                            className="border-red-300 text-red-600 hover:bg-red-50"
+                          >
+                            {invalidatingBugId === selectedBug.bug_id ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 spinner" />
+                                Deleting...
+                              </>
+                            ) : (
+                              <>
+                                <X className="w-4 h-4 mr-2" />
+                                Delete
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            type="button"
+                            onClick={(e) => handleValidateBug(selectedBug.bug_id, e)}
+                            disabled={validatingBugId === selectedBug.bug_id}
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            {validatingBugId === selectedBug.bug_id ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 spinner" />
+                                Validating...
+                              </>
+                            ) : (
+                              <>
+                                <Check className="w-4 h-4 mr-2" />
+                                Mark Valid
+                              </>
+                            )}
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          type="button"
+                          onClick={(e) => handleMarkFixed(selectedBug.bug_id, e)}
+                          disabled={fixingBugId === selectedBug.bug_id}
+                          className="bg-blue-600 hover:bg-blue-700"
+                        >
+                          {fixingBugId === selectedBug.bug_id ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 spinner" />
+                              Marking Fixed...
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-4 h-4 mr-2" />
+                              Mark Fixed
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </DialogFooter>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Promote User Dialog */}
         <Dialog open={!!promotingUserId} onOpenChange={() => setPromotingUserId(null)}>
@@ -1039,6 +1682,262 @@ const AdminDashboard = () => {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Report Detail Dialog */}
+        <Dialog open={reportDialogOpen} onOpenChange={setReportDialogOpen}>
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-500" />
+                Report Details
+              </DialogTitle>
+              <DialogDescription>
+                {selectedReport?.status === "resolved" 
+                  ? "This report has been resolved."
+                  : selectedReport?.status === "dismissed"
+                  ? "This report has been dismissed."
+                  : "Review the report details below."}
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedReport && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Report Type</Label>
+                  <Input
+                    value={selectedReport.report_type.charAt(0).toUpperCase() + selectedReport.report_type.slice(1)}
+                    readOnly
+                    className="bg-slate-50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Target</Label>
+                  <div className="flex items-center gap-2">
+                    {selectedReport.report_type === "item" && selectedReport.reported_item ? (
+                      <>
+                        <Input
+                          value={selectedReport.reported_item.title}
+                          readOnly
+                          className="bg-slate-50"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate(`/item/${selectedReport.reported_item_id}`)}
+                        >
+                          View Item
+                        </Button>
+                        {selectedReport.status === "pending" && (
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => handleRemoveItemFromReport(selectedReport.reported_item_id, selectedReport.report_id)}
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Remove Item
+                          </Button>
+                        )}
+                      </>
+                    ) : selectedReport.report_type === "user" && selectedReport.reported_user ? (
+                      <>
+                        <Input
+                          value={selectedReport.reported_user.username || selectedReport.reported_user.name || selectedReport.reported_user.email}
+                          readOnly
+                          className="bg-slate-50"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate(`/profile/${selectedReport.reported_user_id}`)}
+                        >
+                          View User
+                        </Button>
+                        {selectedReport.status === "pending" && (
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => handleRemoveUserFromReport(selectedReport.reported_user_id, selectedReport.report_id)}
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Remove User
+                          </Button>
+                        )}
+                      </>
+                    ) : selectedReport.report_type === "trade" ? (
+                      <>
+                        <Input
+                          value={`Trade #${selectedReport.reported_trade_id?.slice(-8)}`}
+                          readOnly
+                          className="bg-slate-50"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate(`/messages/${selectedReport.reported_trade_id}`)}
+                        >
+                          View Trade
+                        </Button>
+                      </>
+                    ) : (
+                      <Input value="N/A" readOnly className="bg-slate-50" />
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Category</Label>
+                  <Input
+                    value={selectedReport.category}
+                    readOnly
+                    className="bg-slate-50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Textarea
+                    value={selectedReport.description}
+                    readOnly
+                    className="min-h-[100px] bg-slate-50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Reporter</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={selectedReport.reporter?.username || selectedReport.reporter?.name || selectedReport.reporter?.email || "Unknown"}
+                      readOnly
+                      className="bg-slate-50"
+                    />
+                    {selectedReport.reporter && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigate(`/profile/${selectedReport.reporter_id}`)}
+                      >
+                        View Profile
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Status</Label>
+                  <div>
+                    {selectedReport.status === "resolved" ? (
+                      <Badge variant="default" className="bg-green-600">
+                        Resolved
+                        {selectedReport.resolver && (
+                          <span className="ml-2">
+                            (by {selectedReport.resolver?.username || selectedReport.resolver?.name || "Admin"})
+                          </span>
+                        )}
+                      </Badge>
+                    ) : selectedReport.status === "dismissed" ? (
+                      <Badge variant="default" className="bg-gray-600">
+                        Dismissed
+                        {selectedReport.resolver && (
+                          <span className="ml-2">
+                            (by {selectedReport.resolver?.username || selectedReport.resolver?.name || "Admin"})
+                          </span>
+                        )}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline">Pending</Badge>
+                    )}
+                  </div>
+                </div>
+
+                {selectedReport.action_taken && (
+                  <div className="space-y-2">
+                    <Label>Action Taken</Label>
+                    <Input
+                      value={selectedReport.action_taken.replace("_", " ").replace(/\b\w/g, l => l.toUpperCase())}
+                      readOnly
+                      className="bg-slate-50"
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label>Created</Label>
+                  <Input
+                    value={new Date(selectedReport.created_at).toLocaleString()}
+                    readOnly
+                    className="bg-slate-50"
+                  />
+                </div>
+
+                {selectedReport.resolved_at && (
+                  <div className="space-y-2">
+                    <Label>Resolved</Label>
+                    <Input
+                      value={new Date(selectedReport.resolved_at).toLocaleString()}
+                      readOnly
+                      className="bg-slate-50"
+                    />
+                  </div>
+                )}
+
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setReportDialogOpen(false);
+                      setSelectedReport(null);
+                    }}
+                  >
+                    Close
+                  </Button>
+                  {selectedReport.status === "pending" && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={(e) => handleDismissReport(selectedReport.report_id, e)}
+                        disabled={dismissingReportId === selectedReport.report_id}
+                        className="border-gray-300 text-gray-600 hover:bg-gray-50"
+                      >
+                        {dismissingReportId === selectedReport.report_id ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 spinner" />
+                            Dismissing...
+                          </>
+                        ) : (
+                          <>
+                            <X className="w-4 h-4 mr-2" />
+                            Dismiss
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={(e) => handleResolveReport(selectedReport.report_id, e)}
+                        disabled={resolvingReportId === selectedReport.report_id}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        {resolvingReportId === selectedReport.report_id ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 spinner" />
+                            Resolving...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-4 h-4 mr-2" />
+                            Mark Resolved
+                          </>
+                        )}
+                      </Button>
+                    </>
+                  )}
+                </DialogFooter>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );

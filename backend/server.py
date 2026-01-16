@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Depends, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Depends, WebSocket, WebSocketDisconnect, Body
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -37,8 +37,20 @@ _client = None
 _db = None
 
 # WebSocket connections - in-memory storage
-active_connections: dict[str, WebSocket] = {}
-notification_connections: dict[str, WebSocket] = {}
+# Unified WebSocket connection manager
+# Maps user_id -> {websocket, channels: set[str]}
+# Channels: "messages", "notifications", "trades"
+ws_connections: dict[str, dict] = {}
+
+# Report categories
+REPORT_CATEGORIES = [
+    "Inappropriate Content",
+    "Scam/Fraud",
+    "Item Not as Described",
+    "Harassment",
+    "Spam",
+    "Other"
+]
 
 # Predefined categories (50 categories)
 PREDEFINED_CATEGORIES = [
@@ -204,6 +216,29 @@ class BugReportCreate(BaseModel):
     description: str
     steps_to_reproduce: str
 
+class Report(BaseModel):
+    report_id: str = Field(default_factory=lambda: f"report_{uuid.uuid4().hex[:12]}")
+    reporter_id: str
+    report_type: str  # "item", "user", or "trade"
+    reported_item_id: Optional[str] = None
+    reported_user_id: Optional[str] = None
+    reported_trade_id: Optional[str] = None
+    category: str
+    description: str
+    status: str = "pending"  # "pending", "resolved", "dismissed"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    resolved_at: Optional[datetime] = None
+    resolved_by: Optional[str] = None
+    action_taken: Optional[str] = None  # e.g., "item_removed", "user_banned", "dismissed"
+
+class ReportCreate(BaseModel):
+    report_type: str
+    reported_item_id: Optional[str] = None
+    reported_user_id: Optional[str] = None
+    reported_trade_id: Optional[str] = None
+    category: str
+    description: str
+
 class Notification(BaseModel):
     notification_id: str = Field(default_factory=lambda: f"notif_{uuid.uuid4().hex[:12]}")
     user_id: str
@@ -271,6 +306,33 @@ async def get_admin_user(request: Request) -> User:
 
 # ============== HELPER FUNCTIONS ==============
 
+async def send_ws_message(user_id: str, channel: str, message_type: str, data: dict):
+    """Send a message to a user via WebSocket on a specific channel"""
+    if user_id not in ws_connections:
+        return False
+    
+    connection = ws_connections[user_id]
+    if channel not in connection.get("channels", set()):
+        return False
+    
+    try:
+        await connection["websocket"].send_text(json.dumps({
+            "channel": channel,
+            "type": message_type,
+            "data": data
+        }))
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send WebSocket message to {user_id}: {str(e)}")
+        # Remove broken connection
+        ws_connections.pop(user_id, None)
+        return False
+
+async def broadcast_ws_message(user_ids: list[str], channel: str, message_type: str, data: dict):
+    """Broadcast a message to multiple users via WebSocket"""
+    for user_id in user_ids:
+        await send_ws_message(user_id, channel, message_type, data)
+
 async def create_and_send_notification(user_id: str, notification_type: str, message: str, data: Optional[dict] = None):
     """Create a notification and send it via WebSocket if user is connected"""
     notification = Notification(
@@ -288,17 +350,12 @@ async def create_and_send_notification(user_id: str, notification_type: str, mes
     await db.notifications.insert_one(insert_dict)
     
     # Send via WebSocket if user is connected
-    if user_id in notification_connections:
-        try:
-            ws = notification_connections[user_id]
-            await ws.send_text(json.dumps({
-                "type": "new_notification",
-                "notification": notification_dict
-            }))
-        except Exception as e:
-            logger.error(f"Failed to send notification via WebSocket: {str(e)}")
-            # Remove broken connection
-            notification_connections.pop(user_id, None)
+    await send_ws_message(
+        user_id=user_id,
+        channel="notifications",
+        message_type="new_notification",
+        data={"notification": notification_dict}
+    )
     
     return notification_dict
 
@@ -614,6 +671,9 @@ async def delete_item(item_id: str, user: User = Depends(get_current_user)):
             }}
         )
         
+        # Delete all messages for this trade
+        await db.messages.delete_many({"trade_id": trade["trade_id"]})
+        
         # Create notification for the other party
         message = f"Your trade with {other_user_name} was canceled because {user.name} removed an item."
         await create_and_send_notification(
@@ -901,64 +961,76 @@ async def send_message(msg: MessageCreate, user: User = Depends(get_current_user
     await db.messages.insert_one(insert_dict)
     
     # Broadcast to WebSocket connections
-    broadcast_data = {
-        "type": "new_message",
-        "message": msg_dict
-    }
-    # Send to sender and receiver if they're connected
-    for user_id in [user.user_id, receiver_id]:
-        if user_id in active_connections:
-            try:
-                await active_connections[user_id].send_text(json.dumps(broadcast_data))
-            except Exception:
-                # Remove dead connection
-                active_connections.pop(user_id, None)
+    await broadcast_ws_message(
+        user_ids=[user.user_id, receiver_id],
+        channel="messages",
+        message_type="new_message",
+        data={"message": msg_dict}
+    )
     
     return msg_dict
 
-@api_router.websocket("/ws/messages")
-async def websocket_messages(websocket: WebSocket):
-    """WebSocket endpoint for real-time message delivery"""
+@api_router.websocket("/ws")
+async def websocket_handler(websocket: WebSocket):
+    """Unified WebSocket endpoint for all real-time communication"""
     await websocket.accept()
     user_id = None
     
     try:
-        # Get user from query params or headers
-        # For simplicity, we'll use a token-based approach
-        # In production, you'd validate the token properly
+        # Get authentication token
         token = websocket.query_params.get("token") or websocket.headers.get("authorization", "").replace("Bearer ", "")
         
         if not token:
             await websocket.close(code=1008, reason="Authentication required")
             return
         
-        # Get user from session token
+        # Validate session
         session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
         if not session:
             await websocket.close(code=1008, reason="Invalid session")
             return
         
         user_id = session["user_id"]
-        active_connections[user_id] = websocket
+        
+        # Get requested channels from query params (default to all)
+        channels_param = websocket.query_params.get("channels", "messages,notifications,trades")
+        channels = set(ch.strip() for ch in channels_param.split(",") if ch.strip())
+        
+        # Store connection
+        ws_connections[user_id] = {
+            "websocket": websocket,
+            "channels": channels
+        }
         
         # Send connection confirmation
-        await websocket.send_text(json.dumps({"type": "connected", "user_id": user_id}))
+        await websocket.send_text(json.dumps({
+            "channel": "system",
+            "type": "connected",
+            "data": {"user_id": user_id, "channels": list(channels)}
+        }))
         
         # Keep connection alive and handle incoming messages
         while True:
-            data = await websocket.receive_text()
-            # Handle ping/pong or other messages if needed
-            if data == "ping":
-                await websocket.send_text("pong")
+            try:
+                data = await websocket.receive_text()
+                # Handle ping/pong for keepalive
+                if data == "ping":
+                    await websocket.send_text("pong")
+                # Could handle other client messages here if needed
+            except WebSocketDisconnect:
+                break
             
     except WebSocketDisconnect:
-        if user_id:
-            active_connections.pop(user_id, None)
+        pass
     except Exception as e:
-        logger.error(f"WebSocket error: {str(e)}")
+        logger.error(f"WebSocket error for user {user_id}: {str(e)}")
+    finally:
         if user_id:
-            active_connections.pop(user_id, None)
-        await websocket.close()
+            ws_connections.pop(user_id, None)
+        try:
+            await websocket.close()
+        except:
+            pass
 
 # ============== NOTIFICATION ENDPOINTS ==============
 
@@ -980,6 +1052,15 @@ async def get_notification_count(user: User = Depends(get_current_user)):
     })
     return {"count": count}
 
+@api_router.post("/notifications/mark-read")
+async def mark_all_notifications_read(user: User = Depends(get_current_user)):
+    """Mark all unread notifications for the current user as read"""
+    await db.notifications.update_many(
+        {"user_id": user.user_id, "read_at": None},
+        {"$set": {"read_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"message": "All notifications marked as read"}
+
 @api_router.post("/notifications/{notification_id}/dismiss")
 async def dismiss_notification(notification_id: str, user: User = Depends(get_current_user)):
     """Dismiss/remove a notification"""
@@ -992,47 +1073,6 @@ async def dismiss_notification(notification_id: str, user: User = Depends(get_cu
     await db.notifications.delete_one({"notification_id": notification_id})
     return {"message": "Notification dismissed"}
 
-@api_router.websocket("/ws/notifications")
-async def websocket_notifications(websocket: WebSocket):
-    """WebSocket endpoint for real-time notification delivery"""
-    await websocket.accept()
-    user_id = None
-    
-    try:
-        # Get user from query params or headers
-        token = websocket.query_params.get("token") or websocket.headers.get("authorization", "").replace("Bearer ", "")
-        
-        if not token:
-            await websocket.close(code=1008, reason="Authentication required")
-            return
-        
-        # Get user from session token
-        session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
-        if not session:
-            await websocket.close(code=1008, reason="Invalid session")
-            return
-        
-        user_id = session["user_id"]
-        notification_connections[user_id] = websocket
-        
-        # Send connection confirmation
-        await websocket.send_text(json.dumps({"type": "connected", "user_id": user_id}))
-        
-        # Keep connection alive and handle incoming messages
-        while True:
-            data = await websocket.receive_text()
-            # Handle ping/pong or other messages if needed
-            if data == "ping":
-                await websocket.send_text("pong")
-            
-    except WebSocketDisconnect:
-        if user_id:
-            notification_connections.pop(user_id, None)
-    except Exception as e:
-        logger.error(f"Notification WebSocket error: {str(e)}")
-        if user_id:
-            notification_connections.pop(user_id, None)
-        await websocket.close()
 
 # ============== TRADE ENDPOINTS ==============
 
@@ -1293,6 +1333,9 @@ async def cancel_trade(trade_id: str, user: User = Depends(get_current_user)):
         }}
     )
     
+    # Delete all messages for this trade
+    await db.messages.delete_many({"trade_id": trade_id})
+    
     # Notify the other party
     other_user_id = trade["trader_id"] if trade["owner_id"] == user.user_id else trade["owner_id"]
     other_user = await db.users.find_one({"user_id": other_user_id}, {"_id": 0})
@@ -1485,16 +1528,12 @@ async def add_items_to_trade(trade_id: str, item_data: dict, user: User = Depend
         
         # Broadcast trade update via WebSocket
         other_user_id = trade["owner_id"] if side == "trader" else trade["trader_id"]
-        broadcast_data = {
-            "type": "trade_updated",
-            "trade_id": trade_id
-        }
-        for user_id in [user.user_id, other_user_id]:
-            if user_id in active_connections:
-                try:
-                    await active_connections[user_id].send_text(json.dumps(broadcast_data))
-                except Exception:
-                    active_connections.pop(user_id, None)
+        await broadcast_ws_message(
+            user_ids=[user.user_id, other_user_id],
+            channel="trades",
+            message_type="trade_updated",
+            data={"trade_id": trade_id}
+        )
         
         return updated_trade
     else:
@@ -1527,16 +1566,12 @@ async def add_items_to_trade(trade_id: str, item_data: dict, user: User = Depend
         updated_trade = await migrate_trade_to_array_format(updated_trade)
         
         # Broadcast trade update via WebSocket
-        broadcast_data = {
-            "type": "trade_updated",
-            "trade_id": trade_id
-        }
-        for user_id in [user.user_id, other_user_id]:
-            if user_id in active_connections:
-                try:
-                    await active_connections[user_id].send_text(json.dumps(broadcast_data))
-                except Exception:
-                    active_connections.pop(user_id, None)
+        await broadcast_ws_message(
+            user_ids=[user.user_id, other_user_id],
+            channel="trades",
+            message_type="trade_updated",
+            data={"trade_id": trade_id}
+        )
         
         return updated_trade
 
@@ -1602,16 +1637,12 @@ async def remove_item_from_trade(trade_id: str, item_id: str, user: User = Depen
     updated_trade = await migrate_trade_to_array_format(updated_trade)
     
     # Broadcast trade update via WebSocket
-    broadcast_data = {
-        "type": "trade_updated",
-        "trade_id": trade_id
-    }
-    for user_id in [user.user_id, other_user_id]:
-        if user_id in active_connections:
-            try:
-                await active_connections[user_id].send_text(json.dumps(broadcast_data))
-            except Exception:
-                active_connections.pop(user_id, None)
+    await broadcast_ws_message(
+        user_ids=[user.user_id, other_user_id],
+        channel="trades",
+        message_type="trade_updated",
+        data={"trade_id": trade_id}
+    )
     
     return updated_trade
 
@@ -1684,16 +1715,12 @@ async def request_item_in_trade(trade_id: str, request_data: dict, user: User = 
     await db.messages.insert_one(msg_dict.copy())
     
     # Broadcast via WebSocket
-    broadcast_data = {
-        "type": "new_message",
-        "message": msg_dict
-    }
-    for user_id in [user.user_id, other_user_id]:
-        if user_id in active_connections:
-            try:
-                await active_connections[user_id].send_text(json.dumps(broadcast_data))
-            except Exception:
-                active_connections.pop(user_id, None)
+    await broadcast_ws_message(
+        user_ids=[user.user_id, other_user_id],
+        channel="messages",
+        message_type="new_message",
+        data={"message": msg_dict}
+    )
     
     # Create notification
     requester_name = user.get("username") or user.get("name", "Someone")
@@ -1792,16 +1819,12 @@ async def respond_to_item_request(trade_id: str, request_id: str, response_data:
         await db.messages.insert_one(msg_dict.copy())
         
         # Broadcast
-        broadcast_data = {
-            "type": "new_message",
-            "message": msg_dict
-        }
-        for user_id in [user.user_id, request_message["sender_id"]]:
-            if user_id in active_connections:
-                try:
-                    await active_connections[user_id].send_text(json.dumps(broadcast_data))
-                except Exception:
-                    active_connections.pop(user_id, None)
+        await broadcast_ws_message(
+            user_ids=[user.user_id, request_message["sender_id"]],
+            channel="messages",
+            message_type="new_message",
+            data={"message": msg_dict}
+        )
     else:
         # Create decline message
         message = Message(
@@ -1815,17 +1838,26 @@ async def respond_to_item_request(trade_id: str, request_id: str, response_data:
         msg_dict["created_at"] = msg_dict["created_at"].isoformat()
         await db.messages.insert_one(msg_dict.copy())
         
+        # Send notification for declined request
+        responder_user = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
+        responder_name = responder_user.get("username") or responder_user.get("name", "Someone") if responder_user else "Someone"
+        item = await db.items.find_one({"item_id": item_id}, {"_id": 0})
+        item_title = item.get("title", "item") if item else "item"
+        
+        await create_and_send_notification(
+            user_id=requester_id,
+            notification_type="item_request_declined",
+            message=f"{responder_name} declined your request to add {item_title} to the trade",
+            data={"trade_id": trade_id, "item_id": item_id, "request_id": request_id}
+        )
+        
         # Broadcast
-        broadcast_data = {
-            "type": "new_message",
-            "message": msg_dict
-        }
-        for user_id in [user.user_id, request_message["sender_id"]]:
-            if user_id in active_connections:
-                try:
-                    await active_connections[user_id].send_text(json.dumps(broadcast_data))
-                except Exception:
-                    active_connections.pop(user_id, None)
+        await broadcast_ws_message(
+            user_ids=[user.user_id, request_message["sender_id"]],
+            channel="messages",
+            message_type="new_message",
+            data={"message": msg_dict}
+        )
     
     updated_trade = await db.trades.find_one({"trade_id": trade_id}, {"_id": 0})
     return await migrate_trade_to_array_format(updated_trade)
@@ -1881,6 +1913,219 @@ async def rate_trade(trade_id: str, rating_data: RatingCreate, user: User = Depe
     
     return {"message": "Rating submitted", "rating": rating_data.rating}
 
+# ============== REPORT ENDPOINTS ==============
+
+@api_router.post("/reports")
+async def create_report(report_data: ReportCreate, user: User = Depends(get_current_user)):
+    """Create a new report"""
+    # Validate report type
+    if report_data.report_type not in ["item", "user", "trade"]:
+        raise HTTPException(status_code=400, detail="Invalid report type")
+    
+    # Validate category
+    if report_data.category not in REPORT_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Invalid report category")
+    
+    # Validate that target exists based on type
+    if report_data.report_type == "item":
+        if not report_data.reported_item_id:
+            raise HTTPException(status_code=400, detail="Item ID required for item reports")
+        item = await db.items.find_one({"item_id": report_data.reported_item_id}, {"_id": 0})
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not found")
+        # Prevent reporting own items
+        if item["user_id"] == user.user_id:
+            raise HTTPException(status_code=400, detail="Cannot report your own item")
+    
+    elif report_data.report_type == "user":
+        if not report_data.reported_user_id:
+            raise HTTPException(status_code=400, detail="User ID required for user reports")
+        reported_user = await db.users.find_one({"user_id": report_data.reported_user_id}, {"_id": 0})
+        if not reported_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        # Prevent reporting yourself
+        if report_data.reported_user_id == user.user_id:
+            raise HTTPException(status_code=400, detail="Cannot report yourself")
+    
+    elif report_data.report_type == "trade":
+        if not report_data.reported_trade_id:
+            raise HTTPException(status_code=400, detail="Trade ID required for trade reports")
+        trade = await db.trades.find_one({"trade_id": report_data.reported_trade_id}, {"_id": 0})
+        if not trade:
+            raise HTTPException(status_code=404, detail="Trade not found")
+        # Only allow reporting completed trades
+        if not trade.get("is_completed", False):
+            raise HTTPException(status_code=400, detail="Can only report completed trades")
+        # Verify user is part of the trade
+        if trade["owner_id"] != user.user_id and trade["trader_id"] != user.user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to report this trade")
+    
+    # Check for duplicate pending reports (same reporter, same target)
+    duplicate_query = {
+        "reporter_id": user.user_id,
+        "status": "pending"
+    }
+    if report_data.report_type == "item":
+        duplicate_query["reported_item_id"] = report_data.reported_item_id
+    elif report_data.report_type == "user":
+        duplicate_query["reported_user_id"] = report_data.reported_user_id
+    elif report_data.report_type == "trade":
+        duplicate_query["reported_trade_id"] = report_data.reported_trade_id
+    
+    existing_report = await db.reports.find_one(duplicate_query, {"_id": 0})
+    if existing_report:
+        raise HTTPException(status_code=400, detail="You have already submitted a pending report for this target")
+    
+    # Create report
+    report = Report(
+        reporter_id=user.user_id,
+        report_type=report_data.report_type,
+        reported_item_id=report_data.reported_item_id,
+        reported_user_id=report_data.reported_user_id,
+        reported_trade_id=report_data.reported_trade_id,
+        category=report_data.category,
+        description=report_data.description
+    )
+    
+    report_dict = report.model_dump()
+    report_dict["created_at"] = report_dict["created_at"].isoformat()
+    
+    await db.reports.insert_one(report_dict.copy())
+    
+    # Send notification to all admins
+    admins = await db.users.find({"is_admin": True}, {"_id": 0, "user_id": 1}).to_list(100)
+    for admin in admins:
+        await create_and_send_notification(
+            user_id=admin["user_id"],
+            notification_type="new_report",
+            message=f"New {report_data.report_type} report submitted",
+            data={"report_id": report_dict["report_id"], "report_type": report_data.report_type}
+        )
+    
+    return report_dict
+
+# ============== ADMIN REPORT ENDPOINTS ==============
+
+@api_router.get("/admin/reports")
+async def admin_get_reports(admin: User = Depends(get_admin_user), status: Optional[str] = None, report_type: Optional[str] = None):
+    """Get all reports with reporter and target info (admin only)"""
+    query = {}
+    if status:
+        query["status"] = status
+    if report_type:
+        query["report_type"] = report_type
+    
+    reports = await db.reports.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    # Get reporter info
+    reporter_ids = list(set(r["reporter_id"] for r in reports))
+    reporters_dict = {}
+    if reporter_ids:
+        reporters_cursor = db.users.find({"user_id": {"$in": reporter_ids}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "username": 1})
+        async for reporter_doc in reporters_cursor:
+            reporters_dict[reporter_doc["user_id"]] = reporter_doc
+    
+    # Get reported user info
+    reported_user_ids = list(set(r.get("reported_user_id") for r in reports if r.get("reported_user_id")))
+    reported_users_dict = {}
+    if reported_user_ids:
+        reported_users_cursor = db.users.find({"user_id": {"$in": reported_user_ids}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "username": 1})
+        async for user_doc in reported_users_cursor:
+            reported_users_dict[user_doc["user_id"]] = user_doc
+    
+    # Get reported item info
+    reported_item_ids = list(set(r.get("reported_item_id") for r in reports if r.get("reported_item_id")))
+    reported_items_dict = {}
+    if reported_item_ids:
+        reported_items_cursor = db.items.find({"item_id": {"$in": reported_item_ids}}, {"_id": 0, "item_id": 1, "title": 1, "user_id": 1})
+        async for item_doc in reported_items_cursor:
+            reported_items_dict[item_doc["item_id"]] = item_doc
+    
+    # Get reported trade info
+    reported_trade_ids = list(set(r.get("reported_trade_id") for r in reports if r.get("reported_trade_id")))
+    reported_trades_dict = {}
+    if reported_trade_ids:
+        reported_trades_cursor = db.trades.find({"trade_id": {"$in": reported_trade_ids}}, {"_id": 0, "trade_id": 1, "owner_id": 1, "trader_id": 1})
+        async for trade_doc in reported_trades_cursor:
+            reported_trades_dict[trade_doc["trade_id"]] = trade_doc
+    
+    # Get resolver info
+    resolver_ids = list(set(r.get("resolved_by") for r in reports if r.get("resolved_by")))
+    resolvers_dict = {}
+    if resolver_ids:
+        resolvers_cursor = db.users.find({"user_id": {"$in": resolver_ids}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "username": 1})
+        async for resolver_doc in resolvers_cursor:
+            resolvers_dict[resolver_doc["user_id"]] = resolver_doc
+    
+    result = []
+    for report in reports:
+        result.append({
+            **report,
+            "reporter": reporters_dict.get(report["reporter_id"]),
+            "reported_user": reported_users_dict.get(report.get("reported_user_id")) if report.get("reported_user_id") else None,
+            "reported_item": reported_items_dict.get(report.get("reported_item_id")) if report.get("reported_item_id") else None,
+            "reported_trade": reported_trades_dict.get(report.get("reported_trade_id")) if report.get("reported_trade_id") else None,
+            "resolver": resolvers_dict.get(report.get("resolved_by")) if report.get("resolved_by") else None
+        })
+    
+    return result
+
+@api_router.post("/admin/reports/{report_id}/resolve")
+async def admin_resolve_report(report_id: str, action_data: dict = Body(None), admin: User = Depends(get_admin_user)):
+    """Mark a report as resolved (admin only)"""
+    report = await db.reports.find_one({"report_id": report_id}, {"_id": 0})
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    if report["status"] != "pending":
+        raise HTTPException(status_code=400, detail="Can only resolve pending reports")
+    
+    action_taken = action_data.get("action_taken") if action_data and isinstance(action_data, dict) else None
+    
+    await db.reports.update_one(
+        {"report_id": report_id},
+        {"$set": {
+            "status": "resolved",
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+            "resolved_by": admin.user_id,
+            "action_taken": action_taken
+        }}
+    )
+    
+    return {"message": "Report marked as resolved"}
+
+@api_router.post("/admin/reports/{report_id}/dismiss")
+async def admin_dismiss_report(report_id: str, admin: User = Depends(get_admin_user)):
+    """Dismiss a report (admin only)"""
+    report = await db.reports.find_one({"report_id": report_id}, {"_id": 0})
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    if report["status"] != "pending":
+        raise HTTPException(status_code=400, detail="Can only dismiss pending reports")
+    
+    await db.reports.update_one(
+        {"report_id": report_id},
+        {"$set": {
+            "status": "dismissed",
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+            "resolved_by": admin.user_id,
+            "action_taken": "dismissed"
+        }}
+    )
+    
+    return {"message": "Report dismissed"}
+
+@api_router.delete("/admin/reports/{report_id}")
+async def admin_delete_report(report_id: str, admin: User = Depends(get_admin_user)):
+    """Delete a report (admin only, for cleanup)"""
+    report = await db.reports.find_one({"report_id": report_id}, {"_id": 0})
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    await db.reports.delete_one({"report_id": report_id})
+    return {"message": "Report deleted"}
+
 # ============== BUG REPORT ENDPOINTS ==============
 
 @api_router.post("/bug-reports")
@@ -1921,12 +2166,21 @@ async def admin_get_bug_reports(admin: User = Depends(get_admin_user)):
         async for validator_doc in validators_cursor:
             validators_dict[validator_doc["user_id"]] = validator_doc
     
+    # Get resolver info
+    resolver_ids = list(set(bug.get("resolved_by") for bug in bugs if bug.get("resolved_by")))
+    resolvers_dict = {}
+    if resolver_ids:
+        resolvers_cursor = db.users.find({"user_id": {"$in": resolver_ids}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "username": 1})
+        async for resolver_doc in resolvers_cursor:
+            resolvers_dict[resolver_doc["user_id"]] = resolver_doc
+    
     result = []
     for bug in bugs:
         result.append({
             **bug,
             "user": users_dict.get(bug["user_id"]),
-            "validator": validators_dict.get(bug.get("validated_by")) if bug.get("validated_by") else None
+            "validator": validators_dict.get(bug.get("validated_by")) if bug.get("validated_by") else None,
+            "resolver": resolvers_dict.get(bug.get("resolved_by")) if bug.get("resolved_by") else None
         })
     
     return result
@@ -1968,6 +2222,46 @@ async def admin_validate_bug_report(bug_id: str, admin: User = Depends(get_admin
     )
     
     return {"message": "Bug report validated and trade points awarded"}
+
+@api_router.post("/admin/bug-reports/{bug_id}/invalidate")
+async def admin_invalidate_bug_report(bug_id: str, admin: User = Depends(get_admin_user)):
+    """Delete a bug report (admin only)"""
+    bug = await db.bug_reports.find_one({"bug_id": bug_id}, {"_id": 0})
+    if not bug:
+        raise HTTPException(status_code=404, detail="Bug report not found")
+    
+    if bug.get("is_valid"):
+        raise HTTPException(status_code=400, detail="Cannot delete a validated bug report")
+    
+    # Delete the bug report
+    await db.bug_reports.delete_one({"bug_id": bug_id})
+    
+    return {"message": "Bug report deleted"}
+
+@api_router.post("/admin/bug-reports/{bug_id}/mark-fixed")
+async def admin_mark_bug_fixed(bug_id: str, admin: User = Depends(get_admin_user)):
+    """Mark a validated bug report as fixed (admin only)"""
+    bug = await db.bug_reports.find_one({"bug_id": bug_id}, {"_id": 0})
+    if not bug:
+        raise HTTPException(status_code=404, detail="Bug report not found")
+    
+    if not bug.get("is_valid"):
+        raise HTTPException(status_code=400, detail="Can only mark validated bugs as fixed")
+    
+    if bug.get("is_resolved"):
+        raise HTTPException(status_code=400, detail="Bug report already marked as fixed")
+    
+    # Mark bug as fixed
+    await db.bug_reports.update_one(
+        {"bug_id": bug_id},
+        {"$set": {
+            "is_resolved": True,
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+            "resolved_by": admin.user_id
+        }}
+    )
+    
+    return {"message": "Bug report marked as fixed"}
 
 # ============== FILE UPLOAD ==============
 
@@ -2069,6 +2363,9 @@ async def admin_delete_item(item_id: str, admin: User = Depends(get_admin_user))
             }}
         )
         
+        # Delete all messages for this trade
+        await db.messages.delete_many({"trade_id": trade["trade_id"]})
+        
         # Create notification for owner (if not the admin)
         if trade["owner_id"] != admin.user_id:
             message = f"Your trade with {trader_name} was canceled because admin removed an item."
@@ -2090,6 +2387,18 @@ async def admin_delete_item(item_id: str, admin: User = Depends(get_admin_user))
             )
     
     await db.items.delete_one({"item_id": item_id})
+    
+    # Resolve all pending reports for this item
+    await db.reports.update_many(
+        {"reported_item_id": item_id, "status": "pending"},
+        {"$set": {
+            "status": "resolved",
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+            "resolved_by": admin.user_id,
+            "action_taken": "item_removed"
+        }}
+    )
+    
     return {"message": "Item deleted by admin", "trades_cancelled": len(active_trades)}
 
 @api_router.post("/admin/users/{user_id}/promote")
@@ -2151,6 +2460,17 @@ async def admin_delete_user(user_id: str, admin: User = Depends(get_admin_user))
     await db.items.delete_many({"user_id": user_id})
     await db.messages.delete_many({"$or": [{"sender_id": user_id}, {"receiver_id": user_id}]})
     # Note: Trades are kept for historical record, but could be deleted if needed
+    
+    # Resolve all pending reports for this user
+    await db.reports.update_many(
+        {"reported_user_id": user_id, "status": "pending"},
+        {"$set": {
+            "status": "resolved",
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+            "resolved_by": admin.user_id,
+            "action_taken": "user_banned"
+        }}
+    )
     
     return {"message": "User deleted"}
 

@@ -5,6 +5,7 @@ import { useAuth } from "@/App";
 import { Header } from "@/components/Header";
 import { ItemCard } from "@/components/ItemCard";
 import { DisplayRating } from "@/components/StarRating";
+import { ReportDialog } from "@/components/ReportDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { ArrowLeftRight, Edit2, Loader2 } from "lucide-react";
+import { ArrowLeftRight, Edit2, Loader2, AlertTriangle } from "lucide-react";
 
 const Profile = () => {
   const { userId } = useParams();
@@ -29,6 +30,7 @@ const Profile = () => {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editUsername, setEditUsername] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isReportOpen, setIsReportOpen] = useState(false);
 
   const isOwnProfile = currentUser?.user_id === userId;
 
@@ -155,6 +157,16 @@ const Profile = () => {
                     <Edit2 className="w-4 h-4" />
                   </Button>
                 )}
+                {!isOwnProfile && (
+                  <Button
+                    onClick={() => setIsReportOpen(true)}
+                    variant="outline"
+                    className="mt-2 border-red-300 text-red-600 hover:bg-red-50"
+                  >
+                    <AlertTriangle className="w-4 h-4 mr-2" />
+                    Report User
+                  </Button>
+                )}
               </div>
 
               {profileUser.username && (
@@ -255,6 +267,13 @@ const Profile = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ReportDialog
+        isOpen={isReportOpen}
+        onOpenChange={setIsReportOpen}
+        reportType="user"
+        reportedUserId={userId}
+      />
     </div>
   );
 };

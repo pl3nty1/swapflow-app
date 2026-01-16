@@ -1,8 +1,9 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import { useAuth } from "@/App";
 import { usePreloadCache } from "@/contexts/PreloadContext";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -23,7 +24,6 @@ export const Header = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
   const [notificationCount, setNotificationCount] = useState(0);
-  const notificationWsRef = useRef(null);
 
   const handleLogout = async () => {
     await logout();
@@ -126,59 +126,22 @@ export const Header = () => {
   }, [API, notificationCount]); // getAuthHeaders is stable and doesn't need to be in dependencies
 
   // WebSocket connection for notifications
-  useEffect(() => {
-    if (!user) return;
+  const handleNotificationMessage = useCallback((channel, type, data) => {
+    if (channel === "notifications" && type === "new_notification") {
+      setNotifications((prev) => [data.notification, ...prev]);
+      setNotificationCount((prev) => prev + 1);
+    }
+  }, []);
 
-    const connectNotificationWebSocket = () => {
-      const token = localStorage.getItem("session_token");
-      if (!token) return;
-
-      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsHost = API.replace(/^https?:\/\//, "").replace(/^http:\/\//, "");
-      const wsUrl = `${wsProtocol}//${wsHost}/ws/notifications?token=${token}`;
-
-      try {
-        const ws = new WebSocket(wsUrl);
-        notificationWsRef.current = ws;
-
-        ws.onopen = () => {
-          console.log("Notification WebSocket connected");
-          fetchNotifications(); // Fetch initial notifications
-        };
-
-        ws.onmessage = async (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.type === "new_notification") {
-              setNotifications((prev) => [data.notification, ...prev]);
-              setNotificationCount((prev) => prev + 1);
-            }
-          } catch (error) {
-            console.error("Failed to parse notification WebSocket message:", error);
-          }
-        };
-
-        ws.onerror = (error) => {
-          console.error("Notification WebSocket error:", error);
-        };
-
-        ws.onclose = () => {
-          console.log("Notification WebSocket disconnected, reconnecting...");
-          setTimeout(connectNotificationWebSocket, 3000);
-        };
-      } catch (error) {
-        console.error("Failed to connect notification WebSocket:", error);
+  const { connected: wsConnected } = useWebSocket(
+    ["notifications"],
+    handleNotificationMessage,
+    {
+      onConnect: () => {
+        fetchNotifications(); // Fetch initial notifications on connect
       }
-    };
-
-    connectNotificationWebSocket();
-
-    return () => {
-      if (notificationWsRef.current) {
-        notificationWsRef.current.close();
-      }
-    };
-  }, [user, API, fetchNotifications]);
+    }
+  );
 
 
   const formatTimeAgo = (dateStr) => {

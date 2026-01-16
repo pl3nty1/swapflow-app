@@ -18,7 +18,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { ArrowLeftRight, MessageCircle, Loader2, ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeftRight, MessageCircle, Loader2, ArrowLeft, Trash2, AlertTriangle } from "lucide-react";
+import { ReportDialog } from "@/components/ReportDialog";
 
 const ItemDetail = () => {
   const { itemId } = useParams();
@@ -35,6 +36,7 @@ const ItemDetail = () => {
   const [selectedItemIds, setSelectedItemIds] = useState([]);
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [preferredItems, setPreferredItems] = useState([]);
+  const [isReportOpen, setIsReportOpen] = useState(false);
 
   const isOwner = user?.user_id === item?.user_id;
 
@@ -366,6 +368,14 @@ const ItemDetail = () => {
                   <ArrowLeftRight className="w-5 h-5 mr-2" />
                   Start Trade
                 </Button>
+                <Button
+                  onClick={() => setIsReportOpen(true)}
+                  variant="outline"
+                  className="border-red-300 text-red-600 hover:bg-red-50 rounded-full py-6"
+                >
+                  <AlertTriangle className="w-5 h-5 mr-2" />
+                  Report Item
+                </Button>
               </div>
             )}
 
@@ -479,6 +489,13 @@ const ItemDetail = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ReportDialog
+        isOpen={isReportOpen}
+        onOpenChange={setIsReportOpen}
+        reportType="item"
+        reportedItemId={itemId}
+      />
     </div>
   );
 };

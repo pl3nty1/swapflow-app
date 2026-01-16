@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Eye } from "lucide-react";
 
 export const ItemCard = ({ item, owner }) => {
   const getInitials = (name) => {
@@ -46,25 +47,33 @@ export const ItemCard = ({ item, owner }) => {
           {item.title}
         </h3>
 
-        {/* Owner Info */}
-        {owner && (
-          <div className="flex items-center gap-2 mt-3">
-            <Avatar className="h-6 w-6">
-              <AvatarImage src={owner.picture} alt={owner.name} />
-              <AvatarFallback className="bg-indigo-100 text-indigo-600 text-xs">
-                {getInitials(owner.name)}
-              </AvatarFallback>
-            </Avatar>
-            <span className="text-sm text-slate-500 truncate">
-              {owner.username || owner.name}
-            </span>
-            {owner.rating && (
-              <span className="text-sm text-amber-500 flex items-center gap-1">
-                ★ {owner.rating.toFixed(1)}
+        {/* Owner Info and View Count */}
+        <div className="flex items-center justify-between mt-3">
+          {owner ? (
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <Avatar className="h-6 w-6">
+                <AvatarImage src={owner.picture} alt={owner.name} />
+                <AvatarFallback className="bg-indigo-100 text-indigo-600 text-xs">
+                  {getInitials(owner.name)}
+                </AvatarFallback>
+              </Avatar>
+              <span className="text-sm text-slate-500 truncate">
+                {owner.username || owner.name}
               </span>
-            )}
+              {owner.rating && (
+                <span className="text-sm text-amber-500 flex items-center gap-1">
+                  ★ {owner.rating.toFixed(1)}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="flex-1"></div>
+          )}
+          <div className="flex items-center gap-1 text-slate-500 text-sm flex-shrink-0 ml-2">
+            <Eye className="w-4 h-4" />
+            <span>{item.view_count || 0}</span>
           </div>
-        )}
+        </div>
       </div>
     </Link>
   );
